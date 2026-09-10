@@ -1,4 +1,4 @@
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxZwfKxnEfDD3bCQkSNNXP89ysS4oj2kYyy454tAwLbNQcSm6Ioo3jMecClPvclYSJMfA/exec';
+const APPS_SCRIPT_URL = (process.env.REPAIR_APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbyHAJ31ObeKGW8Xttu8KMpgrGuY3zSCTH66gKuY8qfLYuYYLepEZj0hnddsZon8h_X-8g/exec').trim();
 
 exports.handler = async function(event) {
   const headers = {
@@ -36,7 +36,7 @@ exports.handler = async function(event) {
     const text = await res.text();
 
     if (!res.ok) {
-      return { statusCode: 502, headers, body: JSON.stringify({ success:false, code:'APPS_SCRIPT_HTTP_' + res.status, message:'Apps Script HTTP ' + res.status, response:text.slice(0,500) }) };
+      return { statusCode: 502, headers, body: JSON.stringify({ success:false, code:'APPS_SCRIPT_HTTP_' + res.status, message:(res.status === 404 ? 'Apps Script 404: sai Web App deployment URL. Kiểm tra REPAIR_APPS_SCRIPT_URL hoặc URL fallback trong function.' : 'Apps Script HTTP ' + res.status), response:text.slice(0,500) }) };
     }
 
     // Apps Script phải trả JSON; nếu trả HTML thì biến thành lỗi JSON có mô tả.
