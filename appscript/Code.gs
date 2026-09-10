@@ -68,16 +68,66 @@ const DEFAULTS = {
   CHAM_CONG_THO: [['Tháng', 'Kỹ thuật', 'Ngày', 'Trạng thái', 'Ghi chú', 'Ngày cập nhật', 'Người nhập']]
 };
 
+const API_VERSION = '15.2';
+
+function canonicalAction_(value) {
+  const raw = String(value || '').trim();
+  const key = raw.toLowerCase().replace(/[._\-\s]/g, '');
+  const map = {
+    login: 'login',
+    getmasters: 'getMasters',
+    createrepair: 'createRepair',
+    search: 'search',
+    getdetail: 'getDetail',
+    bootstrap: 'bootstrap',
+    adminoverview: 'adminOverview',
+    progresslist: 'progressList',
+    repairlistpaged: 'repairListPaged',
+    serviceanalytics: 'serviceAnalytics',
+    servicetypeanalytics: 'serviceTypeAnalytics',
+    weeklyanalytics: 'weeklyAnalytics',
+    list: 'list',
+    getdashboard: 'getDashboard',
+    updatestatus: 'updateStatus',
+    quickstatus: 'quickStatus',
+    updatecost: 'updateCost',
+    createtechwork: 'createTechWork',
+    createsentrepair: 'createSentRepair',
+    updatesentrepair: 'updateSentRepair',
+    backfillolddatatoct: 'backfillOldDataToCT',
+    unlockrepair: 'unlockRepair',
+    fixmoneydatecolumns: 'fixMoneyDateColumns',
+    apiinfo: 'apiInfo'
+  };
+  return map[key] || raw;
+}
+
+function apiInfo_() {
+  return {
+    success: true,
+    version: API_VERSION,
+    supportedActions: [
+      'login','getMasters','createRepair','search','getDetail','bootstrap',
+      'adminOverview','progressList','repairListPaged','serviceAnalytics',
+      'serviceTypeAnalytics','weeklyAnalytics','list','getDashboard',
+      'updateStatus','quickStatus','updateCost','createTechWork',
+      'createSentRepair','updateSentRepair','backfillOldDataToCT',
+      'unlockRepair','fixMoneyDateColumns','apiInfo'
+    ]
+  };
+}
+
 function doGet() {
-  return json({ success: true, message: 'POPOPHONE Repair V15 API OK', checkedAt: nowText() });
+  return json({ success: true, message: 'POPOPHONE Repair API OK', version: API_VERSION, checkedAt: nowText() });
 }
 
 function doPost(e) {
   let action = '';
   try {
     const body = JSON.parse(e && e.postData && e.postData.contents || '{}');
-    action = String(body.action || '').trim();
+    action = canonicalAction_(body.action);
 
+    if (action === 'apiInfo') return json(apiInfo_());
     if (action === 'login') return json(login_(body));
 
     const session = getSession_(body);
@@ -109,7 +159,7 @@ function doPost(e) {
     if (action === 'unlockRepair') return json(unlockRepair(body.repairId, withSession_(body.data || {}, session)));
     if (action === 'fixMoneyDateColumns') return json(requireRole_(session, ['admin']) || fixMoneyDateColumns());
 
-    return json({ success: false, message: 'Unknown action: ' + action });
+    return json({ success: false, code: 'UNKNOWN_ACTION', version: API_VERSION, message: 'Unknown action: ' + action });
   } catch (err) {
     return json({
       success: false,

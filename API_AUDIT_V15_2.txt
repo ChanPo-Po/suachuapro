@@ -1,0 +1,41 @@
+POPOPHONE REPAIR — API AUDIT V15.2
+
+Frontend actions verified against appscript/Code.gs:
+- login
+- getMasters
+- createRepair
+- search
+- getDetail
+- adminOverview
+- progressList
+- repairListPaged
+- serviceAnalytics
+- serviceTypeAnalytics
+- weeklyAnalytics
+- updateStatus
+- updateCost
+
+Backend compatibility:
+- canonicalAction_ accepts camelCase, dotted, underscored, dashed and case variants.
+  Example: adminOverview / admin.overview / admin_overview -> adminOverview.
+- apiInfo returns API version + supported actions.
+- Unknown action returns code UNKNOWN_ACTION and API version.
+
+Dashboard behavior:
+- All dashboard calls now use dashboardApi(), which rejects success:false and shows the real API error.
+- If frontend/backend versions differ, the error explicitly tells you to redeploy Code.gs.
+
+Role checks verified:
+- Admin: full analytics + costs.
+- department_head: overview/progress/list/cost; updateCost allowed.
+- tech_manager: progress/list/status/service update; no money analytics.
+- tech: own assigned progress/list + status/service update.
+- store: list/detail only; sees actualRevenue but not internal cost/profit; cannot update status.
+
+Deployment:
+1) Paste appscript/Code.gs from THIS package into Apps Script.
+2) Deploy > Manage deployments > Edit > New version > Deploy.
+3) Keep the same /exec URL if editing the existing deployment.
+4) Upload frontend to Netlify.
+
+API version: 15.2
