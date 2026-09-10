@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbyHAJ31ObeKGW8Xttu8KMpgrGuY3zSCTH66gKuY8qfLYuYYLepEZj0hnddsZon8h_X-8g/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbz52-KB0WwOdMr5aENS_roQG9xpuWGnKOTCPj1iN9ZPt4MGl09w822YI-RtS6PDy1RXBw/exec';
 const DEMO_MODE = false;
 
 // Không để mật khẩu thật ở frontend. Đăng nhập được xác thực ở Apps Script (action: login).
