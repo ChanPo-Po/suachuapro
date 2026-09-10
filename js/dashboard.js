@@ -17,16 +17,33 @@ function dashboardApi(payload, options){
       }
       throw new Error(msg);
     }
+    const needsData = ['getMasters','adminOverview','progressList','repairListPaged','serviceAnalytics','serviceTypeAnalytics','weeklyAnalytics','getDetail','systemCheck'];
+    if (payload && needsData.includes(payload.action) && res.data === undefined) {
+      throw new Error('API trả success nhưng thiếu data cho '+payload.action+'. Response: '+JSON.stringify(res).slice(0,260));
+    }
     return res;
   });
 }
 
 function initDashboard(){
   USER=requireLogin();
+  if(!USER) return;
   document.getElementById('userName').textContent=USER.name||USER.username||'Người dùng';
   document.getElementById('userRole').textContent=(ROLE_LABELS&&ROLE_LABELS[USER.role])||USER.role;
   const today=isoDate(new Date()); PROGRESS_STATE.to=today; const d30=new Date(); d30.setDate(d30.getDate()-30); LIST_STATE.from=isoDate(d30); LIST_STATE.to=today;
-  dashboardApi({action:'getMasters'}).then(r=>{MASTERS=r.data||{}; setupRoleUI(); openTab(defaultTab());}).catch(()=>{setupRoleUI();openTab(defaultTab());});
+  setupRoleUI();
+  const target=defaultTab();
+  const targetEl=document.getElementById(target); if(targetEl) targetEl.innerHTML=skeleton(4);
+  dashboardApi({action:'getMasters'}).then(function(r){
+    MASTERS=r.data||{};
+    return dashboardApi({action:'systemCheck'},{timeoutMs:35000});
+  }).then(function(check){
+    window.REPAIR_SYSTEM_CHECK=check.data||{};
+    openTab(target);
+  }).catch(function(err){
+    if(targetEl) targetEl.innerHTML='<div class="v15-error"><b>Không tải được dữ liệu hệ thống</b><br>'+esc(err.message||err)+'</div>';
+    showToast(err.message||'Không tải được dữ liệu hệ thống','error');
+  });
 }
 function defaultTab(){const a=ROLE_TABS[USER.role]||['repairs'];return a.includes(USER.home)?USER.home:a[0];}
 function setupRoleUI(){
@@ -67,7 +84,7 @@ function loadAdminOverview(){
 function monthStart(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`}
 function renderAdminOverview(d){
   const full=USER.role==='admin';
-  let html=`<div class="v15-filter-card"><div><b>Tính từ đầu tháng đến hôm nay</b><small>${esc(d.periodLabel||'')}</small></div><button onclick="loadAdminOverview()">Làm mới</button></div>`;
+  let html=''; const chk=window.REPAIR_SYSTEM_CHECK||{}; if((d.orders||0)===0 && (chk.parsedRows||0)>0){ html+=`<div class="v15-callout"><b>DATA có ${fmtNum(chk.parsedRows)} đơn nhưng kỳ đang chọn không ra dữ liệu</b><p>Kiểm tra cột Ngày nhận hoặc định dạng ngày. Sample API: ${esc(JSON.stringify((chk.sample||[]).slice(0,2)))}</p></div>`;} html+=`<div class="v15-filter-card"><div><b>Tính từ đầu tháng đến hôm nay</b><small>${esc(d.periodLabel||'')}</small></div><button onclick="loadAdminOverview()">Làm mới</button></div>`;
   html+=`<div class="v15-kpi-grid money-grid">
     <div class="v15-kpi"><small>Doanh thu</small><b>${fmtMoney(d.revenue||0)}</b><span>${fmtNum(d.orders||0)} đơn</span></div>
     <div class="v15-kpi"><small>Chi phí</small><b>${fmtMoney(d.cost||0)}</b><span>Vật tư + công thợ</span></div>

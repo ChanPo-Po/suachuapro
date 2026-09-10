@@ -1,0 +1,6 @@
+
+V15.4 fixes:
+- strict API response validation
+- systemCheck endpoint
+- visible diagnostics for empty DATA/date mapping
+- cache-busted assets

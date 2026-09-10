@@ -68,7 +68,7 @@ const DEFAULTS = {
   CHAM_CONG_THO: [['Tháng', 'Kỹ thuật', 'Ngày', 'Trạng thái', 'Ghi chú', 'Ngày cập nhật', 'Người nhập']]
 };
 
-const API_VERSION = '15.2';
+const API_VERSION = '15.4';
 
 function canonicalAction_(value) {
   const raw = String(value || '').trim();
@@ -97,7 +97,8 @@ function canonicalAction_(value) {
     backfillolddatatoct: 'backfillOldDataToCT',
     unlockrepair: 'unlockRepair',
     fixmoneydatecolumns: 'fixMoneyDateColumns',
-    apiinfo: 'apiInfo'
+    apiinfo: 'apiInfo',
+    systemcheck: 'systemCheck'
   };
   return map[key] || raw;
 }
@@ -112,7 +113,7 @@ function apiInfo_() {
       'serviceTypeAnalytics','weeklyAnalytics','list','getDashboard',
       'updateStatus','quickStatus','updateCost','createTechWork',
       'createSentRepair','updateSentRepair','backfillOldDataToCT',
-      'unlockRepair','fixMoneyDateColumns','apiInfo'
+      'unlockRepair','fixMoneyDateColumns','apiInfo','systemCheck'
     ]
   };
 }
@@ -141,6 +142,7 @@ function doPost(e) {
     if (authError) return json(authError);
 
     if (action === 'bootstrap') return json({ success: true, data: getBootstrapForSession_(session) });
+    if (action === 'systemCheck') return json(systemCheck_(session));
     if (action === 'adminOverview') return json(adminOverview_(body, session));
     if (action === 'progressList') return json(progressList_(body, session));
     if (action === 'repairListPaged') return json(repairListPaged_(body, session));
@@ -170,6 +172,22 @@ function doPost(e) {
   }
 }
 
+
+function systemCheck_(session) {
+  try {
+    const sheet = sh(SHEETS.DATA);
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    const headers = lastRow ? sheet.getRange(1,1,1,lastCol).getDisplayValues()[0] : [];
+    const rows = listRepairs();
+    const sample = rows.slice(0,3).map(function(r){
+      return {repairId:r.repairId,date:String(r.date||''),status:r.status,technician:r.technician,actualRevenue:r.actualRevenue,totalCost:r.totalCost,profit:r.profit};
+    });
+    return {success:true,data:{apiVersion:API_VERSION,role:String(session&&session.role||''),sheetName:SHEETS.DATA,lastRow:lastRow,lastCol:lastCol,parsedRows:rows.length,headers:headers,sample:sample}};
+  } catch (err) {
+    return {success:false,message:'System check lỗi: '+String(err&&err.message||err)};
+  }
+}
 function login_(body) {
   const username = String(body.username || '').trim();
   const password = String(body.password || '').trim();
