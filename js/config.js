@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbyC2q94bbY9ysaby2_QqCIeU6egXvartKZTQPNDEzYrWizE49TDn-CQgBF8hKed1UGXMg/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbxZwfKxnEfDD3bCQkSNNXP89ysS4oj2kYyy454tAwLbNQcSm6Ioo3jMecClPvclYSJMfA/exec';
 const DEMO_MODE = false;
 
 // Không để mật khẩu thật ở frontend. Đăng nhập được xác thực ở Apps Script (action: login).
@@ -22,7 +22,6 @@ function apiCall(payload, options) {
     return mockApi(payload);
   }
 
-  // Gắn session đăng nhập cho các API quản trị. Public form/tra cứu vẫn chạy không cần token.
   try {
     const user = typeof currentUser === 'function' ? currentUser() : JSON.parse(localStorage.getItem('repairUser') || 'null');
     if (user && user.token) {
@@ -42,18 +41,29 @@ function apiCall(payload, options) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
 
-  return fetch(API_URL, {
+  // Trên Netlify: gọi proxy cùng domain để tránh CORS/redirect từ Apps Script.
+  // Khi chạy file/local preview: fallback gọi Apps Script trực tiếp.
+  const isHttpPage = /^https?:$/i.test(window.location.protocol || '');
+  const isNetlifyLike = isHttpPage && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+  const requestUrl = isNetlifyLike ? '/.netlify/functions/repair-api' : API_URL;
+
+  return fetch(requestUrl, {
     method: 'POST',
     body: JSON.stringify(payload),
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8'
-    },
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     signal: controller ? controller.signal : undefined
   }).then(function (res) {
-    if (!res.ok) {
-      throw new Error('API trả lỗi HTTP ' + res.status + '. Kiểm tra lại link Apps Script đã deploy chưa.');
-    }
-    return res.text();
+    return res.text().then(function (text) {
+      if (!res.ok) {
+        let msg = 'API HTTP ' + res.status;
+        try {
+          const e = JSON.parse(text);
+          msg = e.message || msg;
+        } catch (_) {}
+        throw new Error(msg);
+      }
+      return text;
+    });
   }).then(function (text) {
     try {
       const data = JSON.parse(text);
@@ -62,16 +72,16 @@ function apiCall(payload, options) {
       }
       return data;
     } catch (e) {
-      const preview = String(text || '').slice(0, 140);
-      throw new Error('API không trả JSON. Có thể Apps Script deploy sai quyền/link sai. Response: ' + preview);
+      const preview = String(text || '').slice(0, 180);
+      throw new Error('API không trả JSON. Response: ' + preview);
     }
   }).catch(function (err) {
     if (err && err.name === 'AbortError') {
-      err = new Error('API quá lâu không phản hồi sau ' + Math.round(timeoutMs / 1000) + ' giây. Kiểm tra mạng hoặc Apps Script.');
+      err = new Error('API quá lâu không phản hồi sau ' + Math.round(timeoutMs / 1000) + ' giây.');
+    } else if (String(err && err.message || err).includes('Failed to fetch')) {
+      err = new Error('Không kết nối được API. Bản này cần deploy cả thư mục netlify/functions để dùng proxy chống CORS.');
     }
-    if (typeof showToast === 'function') {
-      showToast(err.message || 'Lỗi API', 'error');
-    }
+    if (typeof showToast === 'function') showToast(err.message || 'Lỗi API', 'error');
     throw err;
   }).finally(function () {
     if (timer) clearTimeout(timer);
