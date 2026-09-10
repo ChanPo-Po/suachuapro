@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>POPOPHONE Repair Command</title>
+  <link rel="stylesheet" href="css/style.css?v=15.0.0" />
+</head>
+<body class="repair-v15">
+  <div class="v15-shell">
+    <aside class="v15-sidebar" id="v15Sidebar">
+      <div class="v15-brand"><div class="v15-logo">P</div><div><b>POPOPHONE</b><small>Repair Command</small></div></div>
+      <nav id="v15Nav" class="v15-nav">
+        <button data-tab="overview">⌂ <span>Tổng quan</span></button>
+        <button data-tab="progress">⌁ <span>Tiến độ</span></button>
+        <button data-tab="services">▦ <span>Dịch vụ</span></button>
+        <button data-tab="customers">◉ <span>Loại dịch vụ</span></button>
+        <button data-tab="weekly">▥ <span>Theo tuần</span></button>
+        <button data-tab="repairs">☷ <span>Danh sách đơn</span></button>
+        <button data-tab="cost">₫ <span>Chi phí đơn</span></button>
+      </nav>
+      <div class="v15-user"><b id="userName">--</b><small id="userRole">--</small><button onclick="logout()">Đăng xuất</button></div>
+    </aside>
+
+    <main class="v15-main">
+      <header class="v15-topbar">
+        <div><small id="pageEyebrow">REPAIR COMMAND</small><h1 id="pageTitle">Tổng quan</h1></div>
+        <button class="v15-refresh" onclick="refreshCurrent()">↻</button>
+      </header>
+
+      <section id="overview" class="v15-tab"></section>
+      <section id="progress" class="v15-tab"></section>
+      <section id="services" class="v15-tab"></section>
+      <section id="customers" class="v15-tab"></section>
+      <section id="weekly" class="v15-tab"></section>
+      <section id="repairs" class="v15-tab"></section>
+      <section id="cost" class="v15-tab"></section>
+    </main>
+  </div>
+
+  <nav id="mobileBottomNav" class="v15-bottom-nav"></nav>
+  <div id="modalRoot"></div>
+  <div id="toast" class="toast"></div>
+
+  <script src="js/config.js?v=15.0.0"></script>
+  <script src="js/auth.js?v=15.0.0"></script>
+  <script src="js/dashboard.js?v=15.0.0"></script>
+</body>
+</html>
