@@ -34,7 +34,16 @@ function initDashboard(){
   setupRoleUI();
   const target=defaultTab();
   const targetEl=document.getElementById(target); if(targetEl) targetEl.innerHTML=skeleton(4);
-  dashboardApi({action:'getMasters'}).then(function(r){
+  dashboardApi({action:'apiInfo'},{timeoutMs:20000}).then(function(info){
+    const actual=String(info.version||'');
+    if(actual!==String(EXPECTED_API_VERSION)){
+      throw new Error('Sai phiên bản Apps Script: frontend cần '+EXPECTED_API_VERSION+' nhưng endpoint hiện chạy '+(actual||'không xác định')+'. Deploy appscript/Code.gs của đúng gói này và đồng bộ REPAIR_APPS_SCRIPT_URL trên Netlify.');
+    }
+    if(!Array.isArray(info.supportedActions)||!info.supportedActions.includes('adminOverview')){
+      throw new Error('Apps Script '+actual+' không khai báo route adminOverview. Deploy lại appscript/Code.gs của đúng gói này.');
+    }
+    return dashboardApi({action:'getMasters'});
+  }).then(function(r){
     MASTERS=r.data||{};
     return dashboardApi({action:'systemCheck'},{timeoutMs:35000});
   }).then(function(check){

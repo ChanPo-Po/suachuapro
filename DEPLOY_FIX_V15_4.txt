@@ -1,0 +1,17 @@
+POPOPHONE REPAIR - FIX DONG BO API V15.4
+
+DA FIX:
+- Dong bo URL fallback trong js/config.js va netlify/functions/repair-api.js ve cung 1 Apps Script endpoint.
+- Dashboard preflight apiInfo: bat buoc backend version 15.4.
+- Dashboard kiem tra supportedActions co adminOverview truoc khi tai du lieu.
+- Giu Netlify env REPAIR_APPS_SCRIPT_URL la uu tien cao nhat. Neu env nay dang tro URL cu, code fallback KHONG the ghi de env.
+
+TRINH TU DEPLOY BAT BUOC:
+1. Apps Script: thay TOAN BO Code.gs bang appscript/Code.gs trong goi nay.
+2. Deploy > Manage deployments > Edit > New version > Deploy.
+3. Mo /exec, phai thay version 15.4.
+4. Netlify > Environment variables: REPAIR_APPS_SCRIPT_URL = CHINH URL /exec vua kiem tra.
+5. Deploy lai TOAN BO source Netlify trong goi nay.
+6. Hard refresh Ctrl+Shift+R, dang nhap lai.
+
+Luu y: neu REPAIR_APPS_SCRIPT_URL tren Netlify ton tai va dang la URL cu, web van se goi URL cu du fallback trong source da dung.
