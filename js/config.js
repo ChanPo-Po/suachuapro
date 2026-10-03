@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbzxemOMoerX22KSyJ7Vyl5SbQjPTlNv4p8HKoTj1Oc-tTAt_3Ob9kZevPsAoiT_8x-WpA/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzWzkRhxjRywVy81oK7yxaD5qLIloKITcHFFhmvgEsDS7HP3ff6n1w7cXfXn1SXZfrE/exec';
 const EXPECTED_API_VERSION = '15.4';
 const DEMO_MODE = false;
 
