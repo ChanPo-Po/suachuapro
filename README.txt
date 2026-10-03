@@ -1,57 +1,44 @@
-POPOPHONE V16.0 – THEO DÕI MÁY SỬA CHỮA VÀ BÀN GIAO
+POPOPHONE V16.1 – TỔNG QUAN THÁNG VÀ MÁY CÒN TỒN
 
-CÀI ĐẶT
-1. Thay appscript/Code.gs, cập nhật deployment hiện tại bằng New version > Deploy.
-2. Deploy toàn bộ source Netlify. Giữ URL /exec đang chạy.
-3. Ctrl+F5. Tài khoản hiện tại giữ nguyên.
+TRIỂN KHAI
+1. Cập nhật appscript/Code.gs, Deploy > Manage deployments > Edit > New version.
+2. Deploy toàn bộ source Netlify, gồm netlify/functions. Giữ URL /exec đang chạy.
+3. Ctrl+F5. Giữ tài khoản hiện tại. CSKH: username cskh, mật khẩu tự đặt ở
+Script properties > REPAIR_CSKH_PASSWORD như bản trước.
 
-LUỒNG VẬN HÀNH
-Sale tiếp nhận từ link riêng, dữ liệu vào DATA như trước.
-Cửa hàng xác nhận máy đang tại tiệm / chuyển đến kỹ thuật.
-Kỹ thuật nhận máy, cập nhật vị trí tại kỹ thuật và trạng thái kiểm tra/sửa.
-Sửa xong: trạng thái 7. Đã sửa xong, vẫn là máy còn tồn.
-Kỹ thuật xác nhận đang chuyển về cửa hàng.
-Cửa hàng xác nhận Tại cửa hàng chờ trả.
-Khi khách nhận: cửa hàng bấm Bàn giao > Đã trả khách.
-Máy trạng thái 7 tự chuyển sang 8. Đã trả khách ở bước này.
-Trường hợp back/hủy: xác nhận vị trí Đã trả khách nhưng giữ trạng thái 9/11.
-Vị trí là xác nhận thực tế; dữ liệu cũ chưa ghi vị trí sẽ hiển thị Chưa cập nhật.
-Không tự suy ra máy đã về tiệm chỉ vì trạng thái đã sửa xong.
+TỔNG QUAN
+Mặc định tháng hiện tại. Năm/tháng nằm riêng phía trên thanh mục.
+- Tổng đơn còn tồn hiện tại: chỉ 8. Đã trả khách mới kết thúc.
+  Máy 7. Đã sửa xong, 9. Back lại khách, 11. Hủy sửa chưa chuyển sang 8 vẫn tồn.
+- Đơn nhận hôm nay: tổng số và số lượng theo trạng thái hiện tại.
+- Kỹ thuật: số đơn trong kỳ, số đơn còn tồn (bao gồm tồn kỳ trước).
+- Chi nhánh: số đơn trong kỳ, số đơn còn tồn.
+- Danh sách máy quá hẹn: tối đa 20 máy, ưu tiên hẹn cũ nhất;
+  nút Xem tất cả mở danh sách quá hẹn có phân trang.
 
-DỮ LIỆU / BỘ LỌC
-Mặc định tháng hiện tại và máy còn tồn từ các kỳ trước; không có checkbox.
-Năm/tháng ở đầu trang; bộ lọc tìm đơn/trạng thái/vị trí gọn trên điện thoại.
-Máy 7 chưa trả vẫn tính tồn, khác với bản cũ chỉ đếm máy chưa sửa xong.
-Không hiện doanh thu/lợi nhuận/chi phí trên dashboard và các response vận hành.
-Danh sách phân trang 30 đơn; cache 60 giây; nhấn ↻ để lấy mới ngay.
-Cột Vị trí máy được thêm cuối DATA khi xác nhận bàn giao lần đầu.
-Không xóa/move cột DATA, không thay đổi link Sale nhận máy.
-Trang chủ app chuyển sang đăng nhập; đã bỏ giao diện tiếp nhận trùng lặp.
+MÁY CÒN TỒN
+Lọc chi nhánh bằng cột Chi nhánh nhận / CN nhận / Chi nhánh / CN trong DATA.
+Không dùng các vị trí tự đặt ở bản trước, không thêm cột mới.
+Mỗi thẻ hiện tên máy cùng IMEI, khách, thợ, chi nhánh và hẹn trả.
+Cửa hàng có nút Trả khách cho máy sửa xong/back/hủy.
+Sau xác nhận, trạng thái thành 8. Đã trả khách và giảm tồn.
+CSKH chỉ xem; kỹ thuật thấy đơn của mình và đơn chưa gán.
+Sale tiếp tục nhập từ link riêng, app đọc DATA hiện có.
+Không có giao diện tài chính/doanh thu/lợi nhuận.
 
-PHÂN QUYỀN
-Cửa hàng: xem tổng quan/tồn/danh sách; xác nhận gửi máy, nhận về, trả khách.
-Kỹ thuật: thấy máy chưa gán và máy của mình; cập nhật xử lý/bàn giao.
-QL kỹ thuật/Trưởng phòng/Admin: xem toàn bộ, phân công và cập nhật xử lý.
-CSKH: chỉ xem, không có nút sửa/bàn giao; backend cũng chặn quyền ghi.
-Bật tài khoản CSKH: Apps Script > Project Settings > Script properties,
-thêm REPAIR_CSKH_PASSWORD với mật khẩu tự chọn. Đăng nhập username cskh.
-Không có mật khẩu mặc định cho tài khoản mới này.
-
-TRẠNG THÁI
-1. Đã tiếp nhận
-2. Đang kiểm tra
-3. Chờ báo giá
-4. Chờ khách duyệt
-5. Đang sửa
-6. Chờ linh kiện
-7. Đã sửa xong
-8. Đã trả khách
-9. Back lại khách
-10. Bảo hành lại
-11. Hủy sửa
+TỐI ƯU 504
+Bỏ cách đọc nhiều nhóm dòng rải rác. Đọc tiêu đề và khoảng cột dùng cho
+vận hành trong 2 lần gọi Sheets; chỉ giữ các trường vận hành trong bộ nhớ.
+Lọc kỳ, đếm số lượng và phân trang tại Apps Script.
+Cache nén trên server 15 giây, trong trang 30 giây; đổi trạng thái bỏ cache.
+Nút ↻ bỏ cache trong trang và yêu cầu đọc mới trên server.
+Lỗi đọc 502/504 được thử lại 1 lần; thao tác lưu không tự thử lại.
+Proxy có timeout và trả lỗi JSON thay vì chờ không giới hạn.
+Dữ liệu Sale từ app khác có thể xuất hiện trễ theo cache; dùng ↻ để lấy mới.
+Chưa xác nhận tốc độ hoặc hết 504 trên deployment thật.
 
 KIỂM TRA
-Đã kiểm tra cú pháp, liên kết file, mô phỏng dữ liệu 2022–2026,
-máy đã sửa xong kỳ cũ vẫn tính tồn, trả khách giảm tồn, CSKH không ghi,
-kỹ thuật không sửa máy thợ khác, cửa hàng không trả khi chưa nhận về,
-cache chuyển mục và phản hồi bộ lọc cũ. Chưa chạy trên deployment thật.
+Đã chạy kiểm tra cú pháp, liên kết file và mô phỏng 6.006 đơn:
+đếm tháng/hôm nay, trạng thái cuối 8, nhóm thợ/chi nhánh, quá hẹn,
+2 lần đọc Sheets, cache nén, bỏ cache sau lưu, trả khách, CSKH chỉ xem,
+chuyển mục dùng cache và phản hồi bộ lọc cũ không ghi đè kết quả mới.
