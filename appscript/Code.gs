@@ -68,7 +68,7 @@ const DEFAULTS = {
   CHAM_CONG_THO: [['Tháng', 'Kỹ thuật', 'Ngày', 'Trạng thái', 'Ghi chú', 'Ngày cập nhật', 'Người nhập']]
 };
 
-const API_VERSION = '16.4';
+const API_VERSION = '16.5';
 
 function canonicalAction_(value) {
   const raw = String(value || '').trim();
@@ -1785,17 +1785,17 @@ function readPeriodMaterials_(repairMap){
 }
 
 function opsCode_(status){const m=String(status||'').match(/^\s*(\d+)/);return m?Number(m[1]):0;}
-function isOutstandingOps_(r){return opsCode_(r.status)!==8;}
+function isOutstandingOps_(r){return [8,9,10,11].indexOf(opsCode_(r.status))<0;}
 function operationRows_(body,session){
  if(body.returnedTodayOnly===true){const today=Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd');return readOpsData_(body.fresh===true).filter(function(r){return opsCode_(r.status)===8&&inV15Range_({date:r.handoverDate},today,today)&&(session.role!=='tech'||!r.technician||normText_(r.technician)===normText_(session.name));});}
  if(String(body.q||'').trim()){let all=readOpsData_(body.fresh===true);if(session.role==='tech')all=all.filter(function(r){return !r.technician||normText_(r.technician)===normText_(session.name);});return all;}
  const selected=body.todayOnly===true?Object.assign({},body,{from:Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'),to:Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd')}):body;
  const bounds=periodBounds_(selected),now=parseV15Date_(Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'));
- let rows=readOpsData_(body.fresh===true).filter(function(r){const d=parseV15Date_(r.date);return inV15Range_(r,bounds.from,bounds.to)||(isOutstandingOps_(r)&&(!d||d<=v15DayEnd_(now)));});
+ let rows=readOpsData_(body.fresh===true).filter(function(r){const d=parseV15Date_(r.date);return inV15Range_(r,bounds.from,bounds.to)||((body.onlyOutstanding===true||body.includePending===true)&&isOutstandingOps_(r)&&(!d||d<=v15DayEnd_(now)));});
  if(session.role==='tech')rows=rows.filter(function(r){return !r.technician||normText_(r.technician)===normText_(session.name);});return rows;
 }
 function operationsOverview_(body,session){
- const rows=operationRows_(body,session),month=rows.filter(function(r){return inV15Range_(r,body.from,body.to);}),pending=rows.filter(function(r){const date=parseV15Date_(r.date);return isOutstandingOps_(r)&&(!date||date<=v15DayEnd_(parseV15Date_(Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'))));}),today=Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'),receivedToday=readOpsData_(false).filter(function(r){return (session.role!=='tech'||!r.technician||normText_(r.technician)===normText_(session.name))&&inV15Range_(r,today,today);}),returnedToday=readOpsData_(false).filter(function(r){return (session.role!=='tech'||!r.technician||normText_(r.technician)===normText_(session.name))&&opsCode_(r.status)===8&&inV15Range_({date:r.handoverDate},today,today);}),todayStatuses={},tech={},branches={};
+ const rows=operationRows_(Object.assign({},body,{includePending:true}),session),month=rows.filter(function(r){return inV15Range_(r,body.from,body.to);}),pending=rows.filter(function(r){const date=parseV15Date_(r.date);return isOutstandingOps_(r)&&(!date||date<=v15DayEnd_(parseV15Date_(Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'))));}),today=Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'),receivedToday=readOpsData_(false).filter(function(r){return (session.role!=='tech'||!r.technician||normText_(r.technician)===normText_(session.name))&&inV15Range_(r,today,today);}),returnedToday=readOpsData_(false).filter(function(r){return (session.role!=='tech'||!r.technician||normText_(r.technician)===normText_(session.name))&&opsCode_(r.status)===8&&inV15Range_({date:r.handoverDate},today,today);}),todayStatuses={},tech={},branches={};
  function group(map,name){if(!map[name])map[name]={name:name,total:0,pending:0};return map[name];}
  month.forEach(function(r){group(tech,r.technician||'Chưa gán').total++;group(branches,r.branch||'Chưa có chi nhánh').total++;});
  pending.forEach(function(r){group(tech,r.technician||'Chưa gán').pending++;group(branches,r.branch||'Chưa có chi nhánh').pending++;});
@@ -1837,7 +1837,7 @@ function readOpsData_(fresh){
  if(OPS_DATA_LOCAL_&&!fresh)return OPS_DATA_LOCAL_;
  let cache,revision='0',prefix;
  try{
-   cache=CacheService.getScriptCache();revision=PropertiesService.getScriptProperties().getProperty('OPS_DATA_REV')||'0';prefix='OPS164_'+revision;
+   cache=CacheService.getScriptCache();revision=PropertiesService.getScriptProperties().getProperty('OPS_DATA_REV')||'0';prefix='OPS165_'+revision;
    if(!fresh){const raw=cache.get(prefix);if(raw){const meta=JSON.parse(raw),keys=Array.from({length:meta.parts},function(_,i){return prefix+'_'+i;}),parts=cache.getAll(keys);if(keys.every(function(k){return parts[k];})){const encoded=keys.map(function(k){return parts[k];}).join('');return OPS_DATA_LOCAL_=JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(encoded))).getDataAsString());}}}
  }catch(e){}
  const sheet=sh(SHEETS.DATA),last=sheet.getLastRow(),width=sheet.getLastColumn();if(last<2)return OPS_DATA_LOCAL_=[];

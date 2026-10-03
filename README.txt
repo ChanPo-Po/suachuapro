@@ -1,4 +1,4 @@
-POPOPHONE V16.4 – NHẬN MÁY, BÁO KHÁCH VÀ LỊCH SỬ
+POPOPHONE V16.5 – NHẬN MÁY, BÁO KHÁCH VÀ LỊCH SỬ
 
 TRIỂN KHAI
 1. Thay appscript/Code.gs, cập nhật deployment hiện tại: New version > Deploy.
@@ -21,7 +21,7 @@ kỹ thuật xác nhận; lưu người nhận và thời gian. Không tự đ�
 Cửa hàng bấm Nhận máy về sau khi nhận thực tế, ở trạng thái 7/9/11.
 Phải có xác nhận nhận về trước khi xác nhận trạng thái 8. Đã trả khách.
 Máy cũ chưa có xác nhận vẫn hiện Chưa xác nhận; không tự tạo lịch sử giả.
-Chỉ trạng thái 8 kết thúc đơn và giảm số chưa trả.
+Trạng thái 8, 9, 10, 11 đều kết thúc đơn khi thống kê; trạng thái 1–7 tính tồn.
 
 THÔNG TIN BÁO KHÁCH
 Chi tiết đơn hiện báo giá, kết quả kiểm tra để báo khách, đang chờ việc gì,
@@ -50,12 +50,12 @@ LOG_SUA_CHUA tiếp tục ghi lịch sử; trạng thái mới ghi rõ trước 
 TỐC ĐỘ / KIỂM TRA
 Giữ cache ngắn hạn, đọc DATA theo khoảng cột vận hành và phân trang.
 Theo dõi đơn được đọc thêm từ sheet nhỏ THEO_DOI_DON; bỏ cache sau cập nhật.
-Giữ Nhận hôm nay / Trả hôm nay / Tổng chưa trả cùng thống kê thợ/chi nhánh/quá hẹn.
+Giữ Nhận hôm nay / Trả hôm nay / Tổng máy còn tồn cùng thống kê thợ/chi nhánh/quá hẹn.
 Đã kiểm tra mô phỏng: bàn giao, quyền CSKH, báo giá/kết quả/dự kiến,
 lịch sử trước/sau, tìm đơn năm cũ, không trộn IMEI với mã liên kết,
 cache/chuyển mục và thống kê 6.006 đơn. Chưa kiểm tra deployment thật.
 
-V16.4 – LỊCH SỬ MÁY/KHÁCH VÀ NHIỀU DỊCH VỤ
+V16.5 – LỊCH SỬ MÁY/KHÁCH VÀ NHIỀU DỊCH VỤ
 Chi tiết đơn hiện các lần tiếp nhận cùng IMEI và cùng SĐT trên toàn bộ DATA,
 kể cả đơn đã trả từ các năm trước. SĐT +84 được đối chiếu với dạng 0.
 Không ghép khách chỉ vì trùng tên; không tra cứu bằng IMEI/SĐT trống.
@@ -69,6 +69,20 @@ Giữ giá/ghi chú của dịch vụ cũ còn được chọn. Báo giá tổng
 không tự cộng giá danh mục. Lịch sử máy/khách là các tóm tắt vận hành,
 không chứa chi phí/lợi nhuận. Chỉ tải khi mở chi tiết, tái sử dụng cache DATA.
 
-Kiểm tra V16.4: mô phỏng lịch sử nhiều năm, IMEI/SĐT, danh mục dịch vụ,
+Kiểm tra V16.5: mô phỏng lịch sử nhiều năm, IMEI/SĐT, danh mục dịch vụ,
 thêm/bỏ/xóa hết/chống trùng dịch vụ, giữ giá và ghi chú, log trước/sau;
 kiểm tra lại thống kê 6.006 đơn, cache và phân quyền. Chưa test deployment thật.
+
+V16.5 – QUY TẮC TỒN VÀ PHẠM VI HAI DANH SÁCH
+Trạng thái 8/9/10/11 tính kết thúc; trạng thái 1–7 tính tồn, gồm cả 7 sửa xong.
+Trạng thái trống/không rõ vẫn giữ trong tồn để không bỏ sót phiếu cần xử lý.
+Máy còn tồn: mọi đơn còn tồn đến hôm nay, kể cả nhận ở các kỳ trước.
+Danh sách: tất cả trạng thái trong kỳ đã chọn; không tự gộp tồn kỳ trước.
+Tìm kiếm trong Danh sách vẫn tra toàn bộ lịch sử.
+Tổng quan vẫn cộng tồn cũ; cảnh báo quá hẹn và thống kê thợ/chi nhánh
+cũng áp dụng quy tắc kết thúc mới. Trả hôm nay vẫn là trạng thái 8 có ngày
+trả hôm nay, không coi Back/Bảo hành/Hủy là thực tế đã trả máy.
+Quyền cập nhật, xác nhận bàn giao và khóa đơn trạng thái 8 giữ nguyên.
+
+Đã kiểm tra mô phỏng riêng đủ 11 trạng thái: tồn 1–7, kết thúc 8–11,
+đơn cũ chỉ vào mục tồn, danh sách theo kỳ, tìm xuyên năm và trả hôm nay.
