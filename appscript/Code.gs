@@ -107,13 +107,14 @@ function apiInfo_() {
   return {
     success: true,
     version: API_VERSION,
+    periodFiltering: true,
     supportedActions: [
       'login','getMasters','createRepair','search','getDetail','bootstrap',
       'adminOverview','progressList','repairListPaged','serviceAnalytics',
       'serviceTypeAnalytics','weeklyAnalytics','list','getDashboard',
       'updateStatus','quickStatus','updateCost','createTechWork',
       'createSentRepair','updateSentRepair','backfillOldDataToCT',
-      'unlockRepair','fixMoneyDateColumns','apiInfo','systemCheck'
+      'unlockRepair','fixMoneyDateColumns','apiInfo','systemCheck','dashboardBatch'
     ]
   };
 }
@@ -141,6 +142,7 @@ function doPost(e) {
     const authError = requireAuth_(session);
     if (authError) return json(authError);
 
+    if (action === 'dashboardBatch') return json(dashboardBatch_(body,session));
     if (action === 'bootstrap') return json({ success: true, data: getBootstrapForSession_(session) });
     if (action === 'systemCheck') return json(systemCheck_(session));
     if (action === 'adminOverview') return json(adminOverview_(body, session));
@@ -499,40 +501,44 @@ function normalizeHeader_(value) {
     .replace(/[^a-z0-9]/g, '');
 }
 
+// Resolve aliases once per header map rather than normalizing every column for every cell.
+const ROW_COLUMN_CACHE_ = new WeakMap();
 function rowValue_(row, headerMap, aliases) {
-  aliases = aliases || [];
-  let firstExisting = '';
-
-  // Ưu tiên cột có dữ liệu. Cách này chịu được sheet cũ có cả header alias
-  // và header chuẩn mới được thêm ở cuối nhưng các dòng cũ vẫn đang nằm ở cột alias.
-  for (let i = 0; i < aliases.length; i++) {
-    const idx = headerMap[aliases[i]];
-    if (idx === undefined) continue;
-    const value = row[idx];
-    if (firstExisting === '') firstExisting = value;
-    if (value !== '' && value !== null && value !== undefined) return value;
+  aliases=aliases||[];
+  let cache=ROW_COLUMN_CACHE_.get(headerMap);
+  if(!cache){cache={keys:Object.keys(headerMap),normalized:Object.keys(headerMap).map(normalizeHeader_),aliases:{}};ROW_COLUMN_CACHE_.set(headerMap,cache);}
+  const key=JSON.stringify(aliases);
+  let columns=cache.aliases[key];
+  if(!columns){
+    columns=aliases.filter(function(a){return headerMap[a]!==undefined;}).map(function(a){return headerMap[a];});
+    const normalized=aliases.map(normalizeHeader_);
+    cache.keys.forEach(function(k,i){if(normalized.indexOf(cache.normalized[i])!==-1)columns.push(headerMap[k]);});
+    cache.aliases[key]=columns;
   }
-
-  const normalizedAliases = aliases.map(normalizeHeader_);
-  const keys = Object.keys(headerMap);
-  for (let i = 0; i < keys.length; i++) {
-    if (normalizedAliases.indexOf(normalizeHeader_(keys[i])) === -1) continue;
-    const value = row[headerMap[keys[i]]];
-    if (firstExisting === '') firstExisting = value;
-    if (value !== '' && value !== null && value !== undefined) return value;
+  let firstExisting='';
+  for(let i=0;i<columns.length;i++){
+    const value=row[columns[i]];
+    if(firstExisting==='')firstExisting=value;
+    if(value!==''&&value!==null&&value!==undefined)return value;
   }
-  return firstExisting || '';
+  return firstExisting||'';
 }
 
+
+let BATCH_REPAIR_ROWS_ = null;
+let BATCH_READ_ACTIVE_ = false;
 function listRepairs() {
+  if(BATCH_READ_ACTIVE_ && BATCH_REPAIR_ROWS_) return BATCH_REPAIR_ROWS_;
   const sheet = sh(SHEETS.DATA);
   const vals = sheet.getDataRange().getValues();
   if (vals.length <= 1) return [];
-  const m = mapHeader(SHEETS.DATA);
+  const m = {};
+  vals[0].forEach(function(h,i){const key=String(h||'').trim();if(key&&m[key]===undefined)m[key]=i;});
   const rows = vals.slice(1).filter(function (r) {
     return String(rowValue_(r, m, ['Mã sửa chữa', 'Mã SC', 'Mã sửa', 'MA SUA CHUA']) || '').trim();
   }).map(function (r) { return rowToObj(r, m); }).reverse();
 
+  if(BATCH_READ_ACTIVE_) BATCH_REPAIR_ROWS_=rows;
   return rows;
 }
 
@@ -1073,7 +1079,8 @@ function splitItems(text) {
 }
 
 function getDetail(id) {
-  const data = listRepairs().find(function (x) { return x.repairId === id; });
+  const row=findRow(id);if(row<2)return {success:false,message:'Không tìm thấy đơn sửa chữa.'};
+  const sheet=sh(SHEETS.DATA),data=rowToObj(sheet.getRange(row,1,1,sheet.getLastColumn()).getValues()[0],mapHeader(SHEETS.DATA));
   return { success: true, data: data, logs: logsFor(id), services: ctFor(SHEETS.CT_DICH_VU, id), materials: ctFor(SHEETS.CT_VAT_TU, id) };
 }
 
@@ -1603,7 +1610,7 @@ function roleCanMoneyV15_(role){ return role==='admin' || role==='department_hea
 function adminOverview_(body, session) {
   const role=String(session.role||'');
   if (role!=='admin' && role!=='department_head') return {success:false,message:'Bạn không có quyền xem tổng quan tài chính.'};
-  const all=listRepairs();
+  const all=readPeriodRepairs_(body);
   const rows=all.filter(function(r){return inV15Range_(r,body.from,body.to);});
   let revenue=0,cost=0,profit=0,overdue=0,unassigned=0,waitQuote=0,waitParts=0;
   const tech={};
@@ -1621,10 +1628,11 @@ function adminOverview_(body, session) {
 }
 
 function filterRowsV15_(body, session, pendingOnly) {
-  let rows=listRepairs();
+  let rows=readPeriodRepairs_(body);
   const role=String(session.role||'');
   if(role==='tech') { const k=normText_(session.name||''); rows=rows.filter(function(r){return normText_(r.technician||'')===k;}); }
-  if(body.from||body.to) rows=rows.filter(function(r){return inV15Range_(r,body.from,body.to);});
+  const bounds=periodBounds_(body);
+  rows=rows.filter(function(r){const d=parseV15Date_(r.date);return inV15Range_(r,bounds.from,bounds.to)||(body.includePending===true&&isPendingV15_(r)&&(!d||d<=bounds.end));});
   if(pendingOnly) rows=rows.filter(isPendingV15_);
   if(body.technician) { const k=normText_(body.technician); rows=rows.filter(function(r){return normText_(r.technician||'')===k;}); }
   if(body.branch) { const k=normText_(body.branch); rows=rows.filter(function(r){return normText_(r.branch||'')===k;}); }
@@ -1643,25 +1651,25 @@ function progressList_(body, session){
   if(['admin','department_head','tech_manager','tech'].indexOf(session.role)===-1) return {success:false,message:'Bạn không có quyền xem tiến độ kỹ thuật.'};
   const selected=String(body.status||'');
   const pendingOnly=!(selected.indexOf('7.')===0 || normalizeStatusV15_(selected)==='da hoan thanh' || normalizeStatusV15_(selected)==='da sua xong');
-  const rows=filterRowsV15_(body,session,pendingOnly); const out=pageV15_(rows,body,session); out.success=true; return out;
+  const rows=filterRowsV15_(body,session,pendingOnly); const out=pageV15_(rows,body,session); out.success=true;out.meta.carryPending=rows.filter(function(r){return !inV15Range_(r,body.from,body.to);}).length; return out;
 }
 
 function repairListPaged_(body, session){
   let rows=filterRowsV15_(body,session,false);
   // mặc định 30 ngày nếu không tìm kiếm và không truyền khoảng ngày, tránh mở cả lịch sử 6.000 dòng.
   if(!body.q && !body.from && !body.to){ const to=new Date(), from=new Date(); from.setDate(to.getDate()-30); rows=rows.filter(function(r){const d=parseV15Date_(r.date);return d&&d>=v15DayStart_(from)&&d<=v15DayEnd_(to);}); }
-  const out=pageV15_(rows,body,session); out.success=true; return out;
+  const out=pageV15_(rows,body,session); out.success=true;out.meta.carryPending=rows.filter(function(r){return !inV15Range_(r,body.from,body.to);}).length; return out;
 }
 
 function serviceAnalytics_(body, session){
   if(session.role!=='admin') return {success:false,message:'Chỉ Admin được xem phân tích dịch vụ.'};
-  const rows=listRepairs().filter(function(r){return inV15Range_(r,body.from,body.to);});
+  const rows=readPeriodRepairs_(body).filter(function(r){return inV15Range_(r,body.from,body.to);});
   const map={}, repairMap={}, materialMap={}; let total=0, materialTotal=0;
   rows.forEach(function(r){
     repairMap[String(r.repairId||'')] = r;
     splitServiceV15_(r.repairService).forEach(function(s){ const key=s+'|||'+String(r.product||'Chưa rõ'); if(!map[key]) map[key]={service:s,model:String(r.product||'Chưa rõ'),count:0}; map[key].count++; total++; });
   });
-  readCtMaterials().forEach(function(m){
+  readPeriodMaterials_(repairMap).forEach(function(m){
     const r=repairMap[String(m.repairId||'')]; if(!r) return;
     const name=String(m.name||'Chưa rõ').trim()||'Chưa rõ', model=String(r.product||'Chưa rõ'), qty=Number(m.qty||1)||1, key=name+'|||'+model;
     if(!materialMap[key]) materialMap[key]={material:name,model:model,qty:0,repairCount:0,_repairs:{}};
@@ -1673,8 +1681,8 @@ function serviceAnalytics_(body, session){
 }
 function serviceTypeAnalytics_(body, session){
   if(session.role!=='admin') return {success:false,message:'Chỉ Admin được xem cơ cấu loại dịch vụ.'};
-  const all=listRepairs().slice().sort(function(a,b){return (parseV15Date_(a.date)||0)-(parseV15Date_(b.date)||0);});
-  const firstSeen={}; all.forEach(function(r){const p=onlyDigits_(r.phone||''); const d=parseV15Date_(r.date); if(p&&d&&(!firstSeen[p]||d<firstSeen[p])) firstSeen[p]=d;});
+  const all=readPeriodRepairs_(body);
+  const firstSeen=periodFirstSeen_();
   const rows=all.filter(function(r){return inV15Range_(r,body.from,body.to);}); const types={}, groups={new:0,old:0,warranty:0};
   rows.forEach(function(r){ const typ=String(r.serviceType||'Chưa phân loại').trim()||'Chưa phân loại'; types[typ]=(types[typ]||0)+1; const nk=normText_(typ); if(nk.indexOf('bao hanh')>-1) groups.warranty++; else { const p=onlyDigits_(r.phone||''); const d=parseV15Date_(r.date); if(p&&d&&firstSeen[p]&&Math.abs(v15DayStart_(firstSeen[p])-v15DayStart_(d))<86400000) groups.new++; else groups.old++; } });
   return {success:true,data:{total:rows.length,rows:Object.keys(types).map(function(k){return{name:k,count:types[k]};}).sort(function(a,b){return b.count-a.count;}),customerTotal:rows.length,customerGroups:[{name:'Khách mới',count:groups.new},{name:'Khách cũ',count:groups.old},{name:'Bảo hành',count:groups.warranty}]}};
@@ -1682,8 +1690,68 @@ function serviceTypeAnalytics_(body, session){
 function weekStartV15_(d){ const x=v15DayStart_(d), day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x; }
 function weeklyAnalytics_(body, session){
   if(session.role!=='admin') return {success:false,message:'Chỉ Admin được xem báo cáo tuần.'};
-  const weeks=Math.max(4,Math.min(16,Number(body.weeks||8))), now=new Date(), start=weekStartV15_(now); start.setDate(start.getDate()-(weeks-1)*7); const buckets={};
+  const bounds=periodBounds_(body), start=weekStartV15_(bounds.start), end=weekStartV15_(bounds.end), weeks=Math.round((end-start)/604800000)+1; const buckets={};
   for(let i=0;i<weeks;i++){const ws=new Date(start);ws.setDate(start.getDate()+i*7);const key=Utilities.formatDate(ws,TZ,'yyyy-MM-dd');buckets[key]={key:key,label:'Tuần '+Utilities.formatDate(ws,TZ,'dd/MM'),orders:0,revenue:0,cost:0,profit:0};}
-  listRepairs().forEach(function(r){const d=parseV15Date_(r.date);if(!d||d<start)return;const ws=weekStartV15_(d);const key=Utilities.formatDate(ws,TZ,'yyyy-MM-dd');if(!buckets[key])return;const b=buckets[key];b.orders++;b.revenue+=moneyValue(r.actualRevenue);b.cost+=moneyValue(r.totalCost);b.profit+=moneyValue(r.profit);});
+  readPeriodRepairs_(body).forEach(function(r){const d=parseV15Date_(r.date);if(!d||!inV15Range_(r,bounds.from,bounds.to))return;const ws=weekStartV15_(d);const key=Utilities.formatDate(ws,TZ,'yyyy-MM-dd');if(!buckets[key])return;const b=buckets[key];b.orders++;b.revenue+=moneyValue(r.actualRevenue);b.cost+=moneyValue(r.totalCost);b.profit+=moneyValue(r.profit);});
   return {success:true,data:{rows:Object.keys(buckets).sort().reverse().map(function(k){return buckets[k];})}};
+}
+
+// Read-only warmup. Each existing route retains its own role checks and sanitization.
+function dashboardBatch_(body,session){
+  const requests=body.requests;
+  if(!Array.isArray(requests)||requests.length>7)return {success:false,message:'Batch tối đa 7 yêu cầu đọc.'};
+  const handlers={adminOverview:adminOverview_,progressList:progressList_,repairListPaged:repairListPaged_,serviceAnalytics:serviceAnalytics_,serviceTypeAnalytics:serviceTypeAnalytics_,weeklyAnalytics:weeklyAnalytics_};
+  BATCH_READ_ACTIVE_=true;BATCH_REPAIR_ROWS_=null;
+  try{return {success:true,data:requests.map(function(req){
+    const action=String(req&&req.action||'');
+    if(!Object.prototype.hasOwnProperty.call(handlers,action))return {success:false,message:'Batch chỉ hỗ trợ đọc dữ liệu dashboard.'};
+    try{return handlers[action](req,session);}catch(err){return {success:false,message:String(err&&err.message||err)};}
+  })};}finally{BATCH_READ_ACTIVE_=false;BATCH_REPAIR_ROWS_=null;}
+}
+
+let PERIOD_INDEX_ = null;
+const PERIOD_ROWS_ = {};
+const PERIOD_OBJECTS_ = {};
+function periodColumns_(map, aliases){
+ const out=[];aliases.forEach(function(a){if(map[a]!==undefined&&out.indexOf(map[a])<0)out.push(map[a]);});
+ const norms=aliases.map(normalizeHeader_);Object.keys(map).forEach(function(k){if(norms.indexOf(normalizeHeader_(k))>=0&&out.indexOf(map[k])<0)out.push(map[k]);});return out;
+}
+function periodIndex_(){
+ if(PERIOD_INDEX_)return PERIOD_INDEX_;
+ const sheet=sh(SHEETS.DATA), last=sheet.getLastRow(), width=sheet.getLastColumn(), map={};
+ if(last<2)return PERIOD_INDEX_={sheet:sheet,map:map,width:width,rows:[]};
+ sheet.getRange(1,1,1,width).getValues()[0].forEach(function(h,i){const k=String(h||'').trim();if(k&&map[k]===undefined)map[k]=i;});
+ const dates=periodColumns_(map,['Ngày nhận','Ngày tiếp nhận','Dấu thời gian']);
+ const statuses=periodColumns_(map,['Trạng thái máy','Trạng thái','Tình trạng xử lý']);
+ if(!dates.length||!statuses.length)throw new Error('DATA thiếu cột Ngày nhận hoặc Trạng thái.');
+ const values={};dates.concat(statuses).forEach(function(c){if(!values[c])values[c]=sheet.getRange(2,c+1,last-1,1).getValues();});
+ function valueAt(cols,i){for(let j=0;j<cols.length;j++){const v=values[cols[j]][i][0];if(v!==''&&v!==null&&v!==undefined)return v;}return '';}
+ const rows=[];for(let i=0;i<last-1;i++)rows.push({row:i+2,date:valueAt(dates,i),status:valueAt(statuses,i)});
+ return PERIOD_INDEX_={sheet:sheet,map:map,width:width,rows:rows};
+}
+function periodBounds_(body){
+ const today=new Date(), from=body.from||Utilities.formatDate(new Date(today.getFullYear(),today.getMonth(),1),TZ,'yyyy-MM-dd'),to=body.to||Utilities.formatDate(new Date(today.getFullYear(),today.getMonth()+1,0),TZ,'yyyy-MM-dd');
+ const f=parseV15Date_(from),t=parseV15Date_(to);if(!f||!t)throw new Error('Kỳ dữ liệu không hợp lệ.');return {from:from,to:to,start:v15DayStart_(f),end:v15DayEnd_(t)};
+}
+function readPeriodRepairs_(body){
+ const bounds=periodBounds_(body), key=String(bounds.from)+'|'+String(bounds.to)+'|'+String(body.includePending===true);
+ if(PERIOD_ROWS_[key])return PERIOD_ROWS_[key];
+ const index=periodIndex_(),selected=index.rows.filter(function(r){const d=parseV15Date_(r.date);return (d&&d>=bounds.start&&d<=bounds.end)||(body.includePending===true&&isPendingV15_(r)&&(!d||d<=bounds.end));});
+ const groups=[];selected.filter(function(r){return !PERIOD_OBJECTS_[r.row];}).forEach(function(r){let g=groups[groups.length-1];if(!g||r.row-g.end>8){g={start:r.row,end:r.row,selected:{}};groups.push(g);}g.end=r.row;g.selected[r.row]=true;});
+ groups.forEach(function(g){index.sheet.getRange(g.start,1,g.end-g.start+1,index.width).getValues().forEach(function(row,i){if(!g.selected[g.start+i])return;const obj=rowToObj(row,index.map);PERIOD_OBJECTS_[g.start+i]=obj;});});
+ return PERIOD_ROWS_[key]=selected.map(function(r){return PERIOD_OBJECTS_[r.row];}).filter(function(r){return r&&r.repairId;}).reverse();
+}
+
+function periodFirstSeen_(){
+ const index=periodIndex_(),columns=periodColumns_(index.map,['Số điện thoại','SĐT','Điện thoại']),values={};
+ columns.forEach(function(c){if(index.rows.length)values[c]=index.sheet.getRange(2,c+1,index.rows.length,1).getValues();});
+ const first={};index.rows.forEach(function(r,i){let phone='';for(let j=0;j<columns.length;j++){const v=values[columns[j]][i][0];if(v!==''&&v!==null&&v!==undefined){phone=onlyDigits_(v);break;}}const d=parseV15Date_(r.date);if(phone&&d&&(!first[phone]||d<first[phone]))first[phone]=d;});return first;
+}
+
+function readPeriodMaterials_(repairMap){
+ const sheet=sh(SHEETS.CT_VAT_TU),last=sheet.getLastRow(),width=sheet.getLastColumn();if(last<2||!Object.keys(repairMap).length)return [];
+ const headers=sheet.getRange(1,1,1,width).getValues()[0].map(function(x){return String(x||'').trim();}), id=headers.indexOf('Mã sửa chữa');if(id<0)throw new Error('CT_VAT_TU thiếu cột Mã sửa chữa');
+ const ids=sheet.getRange(2,id+1,last-1,1).getValues(),groups=[];
+ ids.forEach(function(v,i){if(!repairMap[String(v[0]||'')])return;const row=i+2;let g=groups[groups.length-1];if(!g||row-g.end>8){g={start:row,end:row};groups.push(g);}g.end=row;});
+ const out=[];groups.forEach(function(g){sheet.getRange(g.start,1,g.end-g.start+1,width).getValues().forEach(function(row){if(!repairMap[String(row[id]||'')])return;const x={};headers.forEach(function(h,i){x[h]=row[i];});if(x['Tên vật tư'])out.push({repairId:x['Mã sửa chữa'],name:x['Tên vật tư'],qty:Number(x['SL']||1)});});});return out;
 }

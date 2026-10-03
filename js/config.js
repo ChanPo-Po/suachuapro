@@ -1,6 +1,5 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWzkRhxjRywVy81oK7yxaD5qLIloKITcHFFhmvgEsDS7HP3ff6n1w7cXfXn1SXZfrE/exec';
 const EXPECTED_API_VERSION = '15.4';
-const DEMO_MODE = false;
 
 // Không để mật khẩu thật ở frontend. Đăng nhập được xác thực ở Apps Script (action: login).
 // Chỉ bật LOCAL_AUTH_FALLBACK khi test offline/demo.
@@ -19,8 +18,8 @@ const MONEY_HIDDEN_ROLES = ['tech', 'tech_manager'];
 
 function apiCall(payload, options) {
   payload = payload || {};
-  if (DEMO_MODE || !API_URL || API_URL.includes('PASTE_')) {
-    return mockApi(payload);
+  if (!API_URL || API_URL.includes('PASTE_')) {
+    return Promise.reject(new Error('Chưa cấu hình URL Apps Script /exec trong js/config.js.'));
   }
 
   try {

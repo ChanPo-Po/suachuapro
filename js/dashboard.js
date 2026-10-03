@@ -8,7 +8,7 @@ const ROLE_TABS={
 };
 const TITLES={overview:'Tổng quan điều hành',progress:'Tiến độ sửa chữa',services:'Dịch vụ & dòng máy',customers:'Cơ cấu loại dịch vụ',weekly:'Tổng quan theo tuần',repairs:'Danh sách đơn',cost:'Chi phí & lợi nhuận đơn'};
 
-function dashboardApi(payload, options){
+function dashboardApiNetwork(payload, options){
   return apiCall(payload, options).then(function(res){
     if (!res || res.success === false) {
       let msg = (res && res.message) || 'API không xử lý được yêu cầu.';
@@ -25,31 +25,82 @@ function dashboardApi(payload, options){
   });
 }
 
+// Cache lives only in this signed-in page; never persist customer/financial data.
+const READ_ACTIONS = new Set(['apiInfo','getMasters','adminOverview','progressList','repairListPaged','serviceAnalytics','serviceTypeAnalytics','weeklyAnalytics','getDetail']);
+const READ_CACHE = new Map(), READ_PENDING = new Map(), TAB_READY = new Map(), TAB_TICKETS = new Map();
+const CACHE_MS = 60000;
+let PERIOD={year:new Date().getFullYear(),month:new Date().getMonth()+1,includePending:true};
+function periodStart(){return `${PERIOD.year}-${String(PERIOD.month||1).padStart(2,'0')}-01`;}
+function periodEnd(){return isoDate(new Date(PERIOD.year,PERIOD.month||12,0));}
+function periodPayload(p){
+  if(['adminOverview','progressList','repairListPaged','serviceAnalytics','serviceTypeAnalytics','weeklyAnalytics'].includes(p.action))return {...p,from:p.from||periodStart(),to:p.to||periodEnd(),includePending:['progressList','repairListPaged'].includes(p.action)&&PERIOD.includePending};
+  return p;
+}
+function renderPeriodPicker(){
+ const now=new Date().getFullYear(), years=[];for(let y=Math.max(now,PERIOD.year);y>=2022;y--)years.push(y);
+ document.getElementById('periodPicker').innerHTML=`<label>Năm<select id="periodYear" onchange="changePeriod()">${years.map(y=>`<option value="${y}" ${y===PERIOD.year?'selected':''}>${y}</option>`).join('')}</select></label><label>Tháng<select id="periodMonth" onchange="changePeriod()"><option value="0" ${PERIOD.month===0?'selected':''}>Cả năm</option>${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i+1===PERIOD.month?'selected':''}>Tháng ${i+1}</option>`).join('')}</select></label><label class="period-pending"><input id="periodPending" type="checkbox" ${PERIOD.includePending?'checked':''} onchange="changePeriod()">Kèm máy chưa xong từ các kỳ trước</label>`;
+}
+function changePeriod(){
+ PERIOD={year:Number(document.getElementById('periodYear').value),month:Number(document.getElementById('periodMonth').value),includePending:document.getElementById('periodPending').checked};
+ PROGRESS_STATE.from=LIST_STATE.from=periodStart();PROGRESS_STATE.to=LIST_STATE.to=periodEnd();PROGRESS_STATE.page=LIST_STATE.page=1;
+ ['svc','cust'].forEach(p=>ANALYTICS_STATE[p]={from:periodStart(),to:periodEnd()});
+ invalidateDashboard();document.querySelectorAll('.v15-tab').forEach(el=>el.innerHTML='');renderPeriodPicker();
+ return openTab(ACTIVE_TAB).then(()=>warmDashboardTabs());
+}
+let CACHE_EPOCH = 0, API_READY = false, WARM_BATCH_SUPPORTED = false;
+const ANALYTICS_STATE = {svc:{from:'',to:''},cust:{from:'',to:''}};
+function readKey(payload){return JSON.stringify([USER && USER.token, USER && USER.role, periodPayload(payload)]);}
+function invalidateDashboard(){CACHE_EPOCH++;READ_CACHE.clear();READ_PENDING.clear();TAB_READY.clear();TAB_TICKETS.forEach((v,k)=>TAB_TICKETS.set(k,v+1));}
+function dashboardApi(payload, options){
+  payload=periodPayload(payload);
+  if(!READ_ACTIONS.has(payload.action)) return dashboardApiNetwork(payload,options).then(r=>{invalidateDashboard();return r;});
+  const key=readKey(payload), hit=READ_CACHE.get(key);
+  if(hit && Date.now()-hit.at<CACHE_MS) return Promise.resolve(hit.value);
+  if(READ_PENDING.has(key)) return READ_PENDING.get(key);
+  const epoch=CACHE_EPOCH;
+  const request=dashboardApiNetwork(payload,options).then(r=>{if(epoch===CACHE_EPOCH){READ_CACHE.set(key,{at:Date.now(),value:r});if(READ_CACHE.size>100) READ_CACHE.delete(READ_CACHE.keys().next().value);}return r;}).finally(()=>{if(READ_PENDING.get(key)===request) READ_PENDING.delete(key);});
+  READ_PENDING.set(key,request);return request;
+}
+function tabPayload(tab){
+  if(tab==='overview')return {action:'adminOverview',from:monthStart(),to:periodEnd()};
+  if(tab==='progress')return {action:'progressList',...PROGRESS_STATE};
+  if(tab==='repairs'||tab==='cost')return {action:'repairListPaged',...LIST_STATE,...(tab==='cost'?{includeMoney:true}:{})};
+  if(tab==='weekly')return {action:'weeklyAnalytics',from:periodStart(),to:periodEnd()};
+  const prefix=tab==='services'?'svc':'cust', state=ANALYTICS_STATE[prefix];
+  return {action:tab==='services'?'serviceAnalytics':'serviceTypeAnalytics',from:state.from||monthStart(),to:state.to||periodEnd()};
+}
+function beginTabLoad(tab){const n=(TAB_TICKETS.get(tab)||0)+1;TAB_TICKETS.set(tab,n);return n;}
+function currentTabLoad(tab,n){return TAB_TICKETS.get(tab)===n;}
+function warmDashboardTabs(){
+  if(!WARM_BATCH_SUPPORTED)return;
+  const requests=(ROLE_TABS[USER.role]||['repairs']).filter(t=>t!==ACTIVE_TAB).map(t=>periodPayload(tabPayload(t)));
+  const epoch=CACHE_EPOCH, keys=requests.map(readKey), launched=Date.now();
+  if(!requests.length)return;
+  // One Apps Script execution shares a single DATA read across all tab summaries.
+  dashboardApiNetwork({action:'dashboardBatch',requests},{timeoutMs:60000}).then(r=>{
+    if(epoch!==CACHE_EPOCH)return;
+    (r.data||[]).forEach((value,i)=>{const hit=READ_CACHE.get(keys[i]);if(value&&value.success!==false&&(!hit||hit.at<launched))READ_CACHE.set(keys[i],{at:Date.now(),value});});
+  }).catch(e=>console.debug('Background tabs:',e.message));
+}
+
 function initDashboard(){
   USER=requireLogin();
   if(!USER) return;
   document.getElementById('userName').textContent=USER.name||USER.username||'Người dùng';
   document.getElementById('userRole').textContent=(ROLE_LABELS&&ROLE_LABELS[USER.role])||USER.role;
-  const today=isoDate(new Date()); PROGRESS_STATE.to=today; const d30=new Date(); d30.setDate(d30.getDate()-30); LIST_STATE.from=isoDate(d30); LIST_STATE.to=today;
+  PROGRESS_STATE.from=LIST_STATE.from=periodStart();PROGRESS_STATE.to=LIST_STATE.to=periodEnd();renderPeriodPicker();
   setupRoleUI();
-  const target=defaultTab();
+  const target=defaultTab();ACTIVE_TAB=target;
   const targetEl=document.getElementById(target); if(targetEl) targetEl.innerHTML=skeleton(4);
-  dashboardApi({action:'apiInfo'},{timeoutMs:20000}).then(function(info){
-    const actual=String(info.version||'');
-    if(actual!==String(EXPECTED_API_VERSION)){
-      throw new Error('Sai phiên bản Apps Script: frontend cần '+EXPECTED_API_VERSION+' nhưng endpoint hiện chạy '+(actual||'không xác định')+'. Deploy appscript/Code.gs của đúng gói này và đồng bộ REPAIR_APPS_SCRIPT_URL trên Netlify.');
-    }
-    if(!Array.isArray(info.supportedActions)||!info.supportedActions.includes('adminOverview')){
-      throw new Error('Apps Script '+actual+' không khai báo route adminOverview. Deploy lại appscript/Code.gs của đúng gói này.');
-    }
-    return dashboardApi({action:'getMasters'});
-  }).then(function(r){
-    MASTERS=r.data||{};
-    return dashboardApi({action:'systemCheck'},{timeoutMs:35000});
-  }).then(function(check){
-    window.REPAIR_SYSTEM_CHECK=check.data||{};
-    openTab(target);
-  }).catch(function(err){
+  Promise.all([dashboardApi({action:'apiInfo'},{timeoutMs:20000}),dashboardApi({action:'getMasters'})]).then(function(results){
+    const info=results[0], actual=String(info.version||'');
+    if(actual!==String(EXPECTED_API_VERSION)) throw new Error('Sai phiên bản Apps Script: cần '+EXPECTED_API_VERSION+' nhưng nhận '+actual+'.');
+    if(!Array.isArray(info.supportedActions)||!info.supportedActions.includes('adminOverview')) throw new Error('Apps Script thiếu route adminOverview.');
+    if(!info.periodFiltering)throw new Error('Cần cập nhật appscript/Code.gs bản v15.7 để lọc DATA theo kỳ.');
+    WARM_BATCH_SUPPORTED=info.supportedActions.includes('dashboardBatch');
+    MASTERS=results[1].data||{};API_READY=true;
+    return openTab(ACTIVE_TAB || target);
+  }).then(function(){warmDashboardTabs();}).catch(function(err){
     if(targetEl) targetEl.innerHTML='<div class="v15-error"><b>Không tải được dữ liệu hệ thống</b><br>'+esc(err.message||err)+'</div>';
     showToast(err.message||'Không tải được dữ liệu hệ thống','error');
   });
@@ -67,17 +118,21 @@ function openTab(tab){
   document.querySelectorAll('.v15-tab').forEach(x=>x.classList.toggle('active',x.id===tab));
   document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
   document.getElementById('pageTitle').textContent=TITLES[tab]||tab;
-  if(tab==='overview') loadAdminOverview();
-  if(tab==='progress') loadProgress();
-  if(tab==='services') loadServiceAnalytics();
-  if(tab==='customers') loadCustomerAnalytics();
-  if(tab==='weekly') loadWeeklyAnalytics();
-  if(tab==='repairs') loadRepairList();
-  if(tab==='cost') loadCostList();
+  if(!API_READY)return Promise.resolve();
+  const hit=TAB_READY.get(tab), key=readKey(tabPayload(tab));
+  window.scrollTo({top:0,behavior:'smooth'});
+  if(hit&&hit.key===key&&Date.now()-hit.at<CACHE_MS)return Promise.resolve();
+  if(tab==='overview') return loadAdminOverview();
+  if(tab==='progress') return loadProgress();
+  if(tab==='services') return loadServiceAnalytics();
+  if(tab==='customers') return loadCustomerAnalytics();
+  if(tab==='weekly') return loadWeeklyAnalytics();
+  if(tab==='repairs') return loadRepairList();
+  if(tab==='cost') return loadCostList();
   window.scrollTo({top:0,behavior:'smooth'});
 }
-function refreshCurrent(){openTab(ACTIVE_TAB)}
-function isoDate(d){return d.toISOString().slice(0,10)}
+function refreshCurrent(){invalidateDashboard();return openTab(ACTIVE_TAB)}
+function isoDate(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function fmtNum(v){return Number(v||0).toLocaleString('vi-VN')}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function statusName(s){return String(s||'').replace(/^\d+\.\s*/,'')}
@@ -85,15 +140,15 @@ function pct(a,b){return b?Math.round(a*1000/b)/10:0}
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.classList.remove('show'),2200)}
 function skeleton(n=4){return `<div class="v15-skeletons">${Array.from({length:n},()=>'<div class="v15-skeleton"></div>').join('')}</div>`}
 
-function loadAdminOverview(){
+function loadAdminOverview(){const ticket=beginTabLoad('overview');
   const el=document.getElementById('overview'); el.innerHTML=skeleton(6);
   if(USER.role!=='admin'&&USER.role!=='department_head'){el.innerHTML='<div class="v15-empty">Tài khoản này không có dashboard tài chính.</div>';return;}
-  dashboardApi({action:'adminOverview',from:monthStart(),to:isoDate(new Date())},{timeoutMs:35000}).then(r=>renderAdminOverview(r.data||{})).catch(e=>el.innerHTML=`<div class="v15-error">${esc(e.message)}</div>`);
+  return dashboardApi({action:'adminOverview',from:monthStart(),to:periodEnd()},{timeoutMs:35000}).then(r=>{if(currentTabLoad('overview',ticket))renderAdminOverview(r.data||{});}).catch(e=>{if(!currentTabLoad('overview',ticket))return;el.innerHTML=`<div class="v15-error">${esc(e.message)}</div>`;});
 }
-function monthStart(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`}
+function monthStart(){return periodStart()}
 function renderAdminOverview(d){
   const full=USER.role==='admin';
-  let html=''; const chk=window.REPAIR_SYSTEM_CHECK||{}; if((d.orders||0)===0 && (chk.parsedRows||0)>0){ html+=`<div class="v15-callout"><b>DATA có ${fmtNum(chk.parsedRows)} đơn nhưng kỳ đang chọn không ra dữ liệu</b><p>Kiểm tra cột Ngày nhận hoặc định dạng ngày. Sample API: ${esc(JSON.stringify((chk.sample||[]).slice(0,2)))}</p></div>`;} html+=`<div class="v15-filter-card"><div><b>Tính từ đầu tháng đến hôm nay</b><small>${esc(d.periodLabel||'')}</small></div><button onclick="loadAdminOverview()">Làm mới</button></div>`;
+  let html=''; const chk=window.REPAIR_SYSTEM_CHECK||{}; if((d.orders||0)===0 && (chk.parsedRows||0)>0){ html+=`<div class="v15-callout"><b>DATA có ${fmtNum(chk.parsedRows)} đơn nhưng kỳ đang chọn không ra dữ liệu</b><p>Kiểm tra cột Ngày nhận hoặc định dạng ngày. Sample API: ${esc(JSON.stringify((chk.sample||[]).slice(0,2)))}</p></div>`;} html+=`<div class="v15-filter-card"><div><b>Kết quả trong kỳ đã chọn</b><small>${esc(d.periodLabel||'')}</small></div><button onclick="refreshCurrent()">Làm mới</button></div>`;
   html+=`<div class="v15-kpi-grid money-grid">
     <div class="v15-kpi"><small>Doanh thu</small><b>${fmtMoney(d.revenue||0)}</b><span>${fmtNum(d.orders||0)} đơn</span></div>
     <div class="v15-kpi"><small>Chi phí</small><b>${fmtMoney(d.cost||0)}</b><span>Vật tư + công thợ</span></div>
@@ -110,32 +165,33 @@ function renderAdminOverview(d){
   if(full) html+=`<div class="v15-section"><div class="v15-section-head"><div><h2>Đi nhanh</h2><p>Không cần mở danh sách tổng</p></div></div><div class="quick-links"><button onclick="openTab('services')">Dịch vụ & dòng máy</button><button onclick="openTab('customers')">Loại dịch vụ</button><button onclick="openTab('weekly')">Báo cáo tuần</button></div></div>`;
   document.getElementById('overview').innerHTML=html;
 }
-function goTech(name){PROGRESS_STATE.technician=name;PROGRESS_STATE.status='';openTab('progress')}
-function goStatus(s){PROGRESS_STATE.status=s;openTab('progress')}
+function goTech(name){PROGRESS_STATE.technician=name;PROGRESS_STATE.status='';PROGRESS_STATE.page=1;openTab('progress')}
+function goStatus(s){PROGRESS_STATE.status=s;PROGRESS_STATE.page=1;openTab('progress')}
 
 function progressFilters(){
  const sts=(MASTERS.trangThai||[]).filter(s=>!String(s).startsWith('8.')&&!String(s).startsWith('11.'));
  return `<div class="v15-filter-stack"><div class="date-row"><label>Từ ngày<input type="date" id="pgFrom" value="${esc(PROGRESS_STATE.from)}"></label><label>Đến ngày<input type="date" id="pgTo" value="${esc(PROGRESS_STATE.to)}"></label></div><div class="filter-row-v15"><select id="pgTech"><option value="">Tất cả thợ</option>${(MASTERS.kyThuat||[]).map(x=>`<option ${PROGRESS_STATE.technician===x.name?'selected':''}>${esc(x.name)}</option>`).join('')}</select><input id="pgQ" placeholder="Mã sửa / IMEI / SĐT" value="${esc(PROGRESS_STATE.q)}"><button onclick="applyProgressFilters()">Lọc</button></div></div><div class="status-pills"><button class="${!PROGRESS_STATE.status?'active':''}" onclick="setProgressStatus('')">Tất cả pending</button><button class="${PROGRESS_STATE.status==='overdue'?'active':''}" onclick="setProgressStatus('overdue')">Quá hẹn</button><button class="${PROGRESS_STATE.status==='unassigned'?'active':''}" onclick="setProgressStatus('unassigned')">Chưa gán</button>${sts.map(s=>`<button class="${PROGRESS_STATE.status===s?'active':''}" onclick="setProgressStatus('${esc(s)}')">${esc(statusName(s))}</button>`).join('')}</div>`;
 }
-function loadProgress(){const el=document.getElementById('progress');el.innerHTML=progressFilters()+skeleton(4); dashboardApi({action:'progressList',...PROGRESS_STATE},{timeoutMs:35000}).then(r=>renderProgress(r)).catch(e=>el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`)}
+function loadProgress(){const ticket=beginTabLoad('progress');const el=document.getElementById('progress');el.innerHTML=progressFilters()+skeleton(4); return dashboardApi({action:'progressList',...PROGRESS_STATE},{timeoutMs:35000}).then(r=>{if(currentTabLoad('progress',ticket))renderProgress(r);}).catch(e=>{if(!currentTabLoad('progress',ticket))return;el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`;})}
 function applyProgressFilters(){PROGRESS_STATE.from=document.getElementById('pgFrom').value;PROGRESS_STATE.to=document.getElementById('pgTo').value;PROGRESS_STATE.technician=document.getElementById('pgTech').value;PROGRESS_STATE.q=document.getElementById('pgQ').value;PROGRESS_STATE.page=1;loadProgress()}
 function setProgressStatus(s){PROGRESS_STATE.status=s;PROGRESS_STATE.page=1;loadProgress()}
-function renderProgress(res){const el=document.getElementById('progress'), rows=res.data||[], meta=res.meta||{};el.innerHTML=progressFilters()+`<div class="v15-summary-line"><b>${fmtNum(meta.total||rows.length)} đơn</b><span>Chỉ hiển thị dữ liệu phù hợp bộ lọc</span></div><div class="repair-card-list">${rows.map(r=>repairCard(r,true)).join('')||'<div class="v15-empty">Không có đơn phù hợp.</div>'}</div>${pager(meta,'progress')}`}
+function renderProgress(res){const el=document.getElementById('progress'), rows=res.data||[], meta=res.meta||{};el.innerHTML=progressFilters()+`<div class="v15-summary-line"><b>${fmtNum(meta.total||rows.length)} đơn</b><span>${fmtNum(meta.carryPending||0)} máy chưa xong từ kỳ trước · Theo bộ lọc</span></div><div class="repair-card-list">${rows.map(r=>repairCard(r,true)).join('')||'<div class="v15-empty">Không có đơn phù hợp.</div>'}</div>${pager(meta,'progress')}`}
 function repairCard(r,allowUpdate){return `<article class="repair-card-v15 ${String(r.overdue).toLowerCase()==='có'?'overdue':''}"><div class="repair-card-head"><div><b>${esc(r.repairId)}</b><span>${esc(r.product||'')}</span></div><em>${esc(statusName(r.status))}</em></div><div class="repair-info"><span>IMEI <b>${esc(r.imei||'')}</b></span><span>Khách <b>${esc(r.customer||'')}</b></span><span>Thợ <b>${esc(r.technician||'Chưa gán')}</b></span><span>Hẹn <b>${esc(dateOnly(r.appointment)||'--')}</b></span></div><div class="repair-service">${esc(r.repairService||r.request||'Chưa có dịch vụ')}</div><div class="repair-actions"><button onclick="viewDetail('${esc(r.repairId)}')">Chi tiết</button>${allowUpdate&&USER.role!=='store'?`<button class="primary" onclick="editStatus('${esc(r.repairId)}')">Cập nhật</button>`:''}${USER.role==='store'?`<button class="primary" onclick="viewDetail('${esc(r.repairId)}')">${fmtMoney(r.actualRevenue||0)}</button>`:''}</div></article>`}
 function pager(meta,type){if(!meta||meta.pages<=1)return'';return `<div class="v15-pager"><button ${meta.page<=1?'disabled':''} onclick="changePage('${type}',-1)">←</button><span>${meta.page}/${meta.pages}</span><button ${meta.page>=meta.pages?'disabled':''} onclick="changePage('${type}',1)">→</button></div>`}
 function changePage(type,d){if(type==='progress'){PROGRESS_STATE.page+=d;loadProgress()}else{LIST_STATE.page+=d;loadRepairList()}window.scrollTo({top:0,behavior:'smooth'})}
 
-function loadServiceAnalytics(){const el=document.getElementById('services');el.innerHTML=analyticsFilter('svc')+skeleton(5);callAnalytics('serviceAnalytics','svc').then(r=>{const d=r.data||{};el.innerHTML=analyticsFilter('svc')+`<div class="v15-section"><div class="v15-section-head"><div><h2>Dịch vụ × dòng máy</h2><p>Số lần phát sinh trong kỳ</p></div></div><div class="analytics-list">${(d.rows||[]).map((x,i)=>`<div class="analytics-row"><strong>${i+1}</strong><div><b>${esc(x.service)}</b><span>${esc(x.model)}</span></div><em>${fmtNum(x.count)}</em><small>${pct(x.count,d.total)}%</small></div>`).join('')||'<div class="v15-empty">Chưa có dữ liệu</div>'}</div></div><div class="v15-section"><div class="v15-section-head"><div><h2>Vật tư thực tế đã dùng</h2><p>Đếm từ CT_VAT_TU để hỗ trợ quyết định nhập thêm</p></div></div><div class="analytics-list">${(d.materials||[]).map((x,i)=>`<div class="analytics-row"><strong>${i+1}</strong><div><b>${esc(x.material)}</b><span>${esc(x.model)} · ${fmtNum(x.repairCount)} đơn</span></div><em>${fmtNum(x.qty)}</em><small>SL</small></div>`).join('')||'<div class="v15-empty">Chưa có dữ liệu vật tư</div>'}</div></div>`}).catch(e=>el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`)}
-function loadCustomerAnalytics(){const el=document.getElementById('customers');el.innerHTML=analyticsFilter('cust')+skeleton(4);callAnalytics('serviceTypeAnalytics','cust').then(r=>{const d=r.data||{};el.innerHTML=analyticsFilter('cust')+`<div class="v15-kpi-grid">${(d.rows||[]).map(x=>`<div class="v15-kpi"><small>${esc(x.name)}</small><b>${fmtNum(x.count)}</b><span>${pct(x.count,d.total)}%</span></div>`).join('')}</div><div class="v15-section"><div class="v15-section-head"><div><h2>Khách mới / cũ / bảo hành</h2><p>Suy ra theo SĐT và loại dịch vụ</p></div></div><div class="customer-bars">${(d.customerGroups||[]).map(x=>`<div><label><b>${esc(x.name)}</b><span>${fmtNum(x.count)} · ${pct(x.count,d.customerTotal)}%</span></label><i><u style="width:${pct(x.count,d.customerTotal)}%"></u></i></div>`).join('')}</div></div>`}).catch(e=>el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`)}
-function loadWeeklyAnalytics(){const el=document.getElementById('weekly');el.innerHTML=skeleton(5);dashboardApi({action:'weeklyAnalytics',weeks:8},{timeoutMs:35000}).then(r=>{const d=r.data||{};el.innerHTML=`<div class="v15-section"><div class="v15-section-head"><div><h2>8 tuần gần nhất</h2><p>Số đơn · doanh thu · chi phí · lợi nhuận</p></div></div><div class="week-list">${(d.rows||[]).map(x=>`<div class="week-card"><div><b>${esc(x.label)}</b><span>${fmtNum(x.orders)} đơn</span></div><div><small>Doanh thu</small><b>${fmtMoney(x.revenue)}</b></div><div><small>Chi phí</small><b>${fmtMoney(x.cost)}</b></div><div><small>Lợi nhuận</small><b>${fmtMoney(x.profit)}</b></div></div>`).join('')||'<div class="v15-empty">Chưa có dữ liệu</div>'}</div></div>`}).catch(e=>el.innerHTML=`<div class="v15-error">${esc(e.message)}</div>`)}
-function analyticsFilter(prefix){return `<div class="v15-filter-stack"><div class="date-row"><label>Từ ngày<input type="date" id="${prefix}From" value="${monthStart()}"></label><label>Đến ngày<input type="date" id="${prefix}To" value="${isoDate(new Date())}"></label></div><button onclick="${prefix==='svc'?'loadServiceAnalytics()':'loadCustomerAnalytics()'}">Áp dụng</button></div>`}
-function callAnalytics(action,prefix){const f=document.getElementById(prefix+'From'),t=document.getElementById(prefix+'To');return dashboardApi({action,from:f?f.value:monthStart(),to:t?t.value:isoDate(new Date())},{timeoutMs:35000})}
+function loadServiceAnalytics(){const ticket=beginTabLoad('services');captureAnalytics('svc');const el=document.getElementById('services');el.innerHTML=analyticsFilter('svc')+skeleton(5);return callAnalytics('serviceAnalytics','svc').then(r=>{if(!currentTabLoad('services',ticket))return;const d=r.data||{};el.innerHTML=analyticsFilter('svc')+`<div class="v15-section"><div class="v15-section-head"><div><h2>Dịch vụ × dòng máy</h2><p>Số lần phát sinh trong kỳ</p></div></div><div class="analytics-list">${(d.rows||[]).map((x,i)=>`<div class="analytics-row"><strong>${i+1}</strong><div><b>${esc(x.service)}</b><span>${esc(x.model)}</span></div><em>${fmtNum(x.count)}</em><small>${pct(x.count,d.total)}%</small></div>`).join('')||'<div class="v15-empty">Chưa có dữ liệu</div>'}</div></div><div class="v15-section"><div class="v15-section-head"><div><h2>Vật tư thực tế đã dùng</h2><p>Đếm từ CT_VAT_TU để hỗ trợ quyết định nhập thêm</p></div></div><div class="analytics-list">${(d.materials||[]).map((x,i)=>`<div class="analytics-row"><strong>${i+1}</strong><div><b>${esc(x.material)}</b><span>${esc(x.model)} · ${fmtNum(x.repairCount)} đơn</span></div><em>${fmtNum(x.qty)}</em><small>SL</small></div>`).join('')||'<div class="v15-empty">Chưa có dữ liệu vật tư</div>'}</div></div>`}).catch(e=>{if(!currentTabLoad('services',ticket))return;el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`;})}
+function loadCustomerAnalytics(){const ticket=beginTabLoad('customers');captureAnalytics('cust');const el=document.getElementById('customers');el.innerHTML=analyticsFilter('cust')+skeleton(4);return callAnalytics('serviceTypeAnalytics','cust').then(r=>{if(!currentTabLoad('customers',ticket))return;const d=r.data||{};el.innerHTML=analyticsFilter('cust')+`<div class="v15-kpi-grid">${(d.rows||[]).map(x=>`<div class="v15-kpi"><small>${esc(x.name)}</small><b>${fmtNum(x.count)}</b><span>${pct(x.count,d.total)}%</span></div>`).join('')}</div><div class="v15-section"><div class="v15-section-head"><div><h2>Khách mới / cũ / bảo hành</h2><p>Suy ra theo SĐT và loại dịch vụ</p></div></div><div class="customer-bars">${(d.customerGroups||[]).map(x=>`<div><label><b>${esc(x.name)}</b><span>${fmtNum(x.count)} · ${pct(x.count,d.customerTotal)}%</span></label><i><u style="width:${pct(x.count,d.customerTotal)}%"></u></i></div>`).join('')}</div></div>`}).catch(e=>{if(!currentTabLoad('customers',ticket))return;el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`;})}
+function loadWeeklyAnalytics(){const ticket=beginTabLoad('weekly');const el=document.getElementById('weekly');el.innerHTML=skeleton(5);return dashboardApi({action:'weeklyAnalytics',from:periodStart(),to:periodEnd()},{timeoutMs:35000}).then(r=>{if(!currentTabLoad('weekly',ticket))return;const d=r.data||{};el.innerHTML=`<div class="v15-section"><div class="v15-section-head"><div><h2>Theo tuần trong kỳ đã chọn</h2><p>Số đơn · doanh thu · chi phí · lợi nhuận</p></div></div><div class="week-list">${(d.rows||[]).map(x=>`<div class="week-card"><div><b>${esc(x.label)}</b><span>${fmtNum(x.orders)} đơn</span></div><div><small>Doanh thu</small><b>${fmtMoney(x.revenue)}</b></div><div><small>Chi phí</small><b>${fmtMoney(x.cost)}</b></div><div><small>Lợi nhuận</small><b>${fmtMoney(x.profit)}</b></div></div>`).join('')||'<div class="v15-empty">Chưa có dữ liệu</div>'}</div></div>`}).catch(e=>{if(!currentTabLoad('weekly',ticket))return;el.innerHTML=`<div class="v15-error">${esc(e.message)}</div>`;})}
+function analyticsFilter(prefix){return `<div class="v15-filter-stack"><div class="date-row"><label>Từ ngày<input type="date" id="${prefix}From" value="${ANALYTICS_STATE[prefix].from||monthStart()}"></label><label>Đến ngày<input type="date" id="${prefix}To" value="${ANALYTICS_STATE[prefix].to||periodEnd()}"></label></div><button onclick="${prefix==='svc'?'loadServiceAnalytics()':'loadCustomerAnalytics()'}">Áp dụng</button></div>`}
+function captureAnalytics(prefix){const f=document.getElementById(prefix+'From'),t=document.getElementById(prefix+'To');if(f&&t)ANALYTICS_STATE[prefix]={from:f.value,to:t.value};}
+function callAnalytics(action,prefix){const state=ANALYTICS_STATE[prefix];return dashboardApi({action,from:state.from||monthStart(),to:state.to||periodEnd()},{timeoutMs:35000})}
 
-function loadRepairList(){const el=document.getElementById('repairs');el.innerHTML=listFilters()+skeleton(5);dashboardApi({action:'repairListPaged',...LIST_STATE},{timeoutMs:35000}).then(r=>{el.innerHTML=listFilters()+`<div class="v15-summary-line"><b>${fmtNum((r.meta||{}).total||0)} đơn</b><span>30 đơn/trang, không tải toàn bộ DATA</span></div><div class="repair-card-list">${(r.data||[]).map(x=>repairCard(x,USER.role!=='store')).join('')||'<div class="v15-empty">Không có dữ liệu.</div>'}</div>${pager(r.meta||{},'list')}`}).catch(e=>el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`)}
+function loadRepairList(){const ticket=beginTabLoad('repairs');const el=document.getElementById('repairs');el.innerHTML=listFilters()+skeleton(5);return dashboardApi({action:'repairListPaged',...LIST_STATE},{timeoutMs:35000}).then(r=>{if(!currentTabLoad('repairs',ticket))return;el.innerHTML=listFilters()+`<div class="v15-summary-line"><b>${fmtNum((r.meta||{}).total||0)} đơn</b><span>${fmtNum((r.meta||{}).carryPending||0)} máy chưa xong từ kỳ trước · 30 đơn/trang</span></div><div class="repair-card-list">${(r.data||[]).map(x=>repairCard(x,USER.role!=='store')).join('')||'<div class="v15-empty">Không có dữ liệu.</div>'}</div>${pager(r.meta||{},'list')}`}).catch(e=>{if(!currentTabLoad('repairs',ticket))return;el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`;})}
 function listFilters(){return `<div class="v15-filter-stack"><input id="lsQ" placeholder="Tìm mã sửa / IMEI / SĐT / khách" value="${esc(LIST_STATE.q)}"><div class="date-row"><label>Từ ngày<input id="lsFrom" type="date" value="${esc(LIST_STATE.from)}"></label><label>Đến ngày<input id="lsTo" type="date" value="${esc(LIST_STATE.to)}"></label></div><div class="filter-row-v15"><select id="lsStatus"><option value="">Tất cả trạng thái</option>${(MASTERS.trangThai||[]).map(s=>`<option ${LIST_STATE.status===s?'selected':''}>${esc(statusName(s))}</option>`).join('')}</select><button onclick="applyListFilters()">Tìm</button></div></div>`}
-function applyListFilters(){LIST_STATE.q=document.getElementById('lsQ').value;LIST_STATE.from=document.getElementById('lsFrom').value;LIST_STATE.to=document.getElementById('lsTo').value;LIST_STATE.status=document.getElementById('lsStatus').value;LIST_STATE.page=1;if(ACTIVE_TAB==='cost')loadCostList();else loadRepairList()}
+function applyListFilters(){const panel=document.getElementById(ACTIVE_TAB);LIST_STATE.q=panel.querySelector('#lsQ').value;LIST_STATE.from=panel.querySelector('#lsFrom').value;LIST_STATE.to=panel.querySelector('#lsTo').value;LIST_STATE.status=panel.querySelector('#lsStatus').value;LIST_STATE.page=1;if(ACTIVE_TAB==='cost')loadCostList();else loadRepairList()}
 
-function loadCostList(){if(!['admin','department_head'].includes(USER.role))return; const el=document.getElementById('cost');el.innerHTML=`<div class="v15-callout"><b>Chi phí đơn</b><p>Tìm đơn trước rồi mới cập nhật. Không tải toàn bộ dữ liệu tài chính.</p></div>${listFilters()}${skeleton(4)}`;dashboardApi({action:'repairListPaged',...LIST_STATE,includeMoney:true},{timeoutMs:35000}).then(r=>{el.innerHTML=`<div class="v15-callout"><b>Chi phí đơn</b><p>Tìm đơn trước rồi mới cập nhật. Không tải toàn bộ dữ liệu tài chính.</p></div>${listFilters()}<div class="repair-card-list">${(r.data||[]).map(x=>costCard(x)).join('')}</div>`})}
+function loadCostList(){const ticket=beginTabLoad('cost');if(!['admin','department_head'].includes(USER.role))return; const el=document.getElementById('cost');el.innerHTML=`<div class="v15-callout"><b>Chi phí đơn</b><p>Tìm đơn trước rồi mới cập nhật. Không tải toàn bộ dữ liệu tài chính.</p></div>${listFilters()}${skeleton(4)}`;return dashboardApi({action:'repairListPaged',...LIST_STATE,includeMoney:true},{timeoutMs:35000}).then(r=>{if(!currentTabLoad('cost',ticket))return;el.innerHTML=`<div class="v15-callout"><b>Chi phí đơn</b><p>Tìm đơn trước rồi mới cập nhật. Không tải toàn bộ dữ liệu tài chính.</p></div>${listFilters()}<div class="repair-card-list">${(r.data||[]).map(x=>costCard(x)).join('')}</div>`}).catch(e=>{if(currentTabLoad('cost',ticket))el.innerHTML+=`<div class="v15-error">${esc(e.message)}</div>`;})}
 function costCard(r){return `<article class="repair-card-v15"><div class="repair-card-head"><div><b>${esc(r.repairId)}</b><span>${esc(r.product||'')}</span></div><em>${esc(statusName(r.status))}</em></div><div class="money-mini"><span>Thu khách<b>${fmtMoney(r.actualRevenue||0)}</b></span><span>Chi phí<b>${fmtMoney(r.totalCost||0)}</b></span><span>Lợi nhuận<b>${fmtMoney(r.profit||0)}</b></span></div><div class="repair-actions"><button onclick="viewDetail('${esc(r.repairId)}')">Chi tiết</button><button class="primary" onclick="editCost('${esc(r.repairId)}')">Cập nhật chi phí</button></div></article>`}
 
 function viewDetail(id){dashboardApi({action:'getDetail',repairId:id}).then(r=>{const x=r.data||{};showModal(`<div class="modal-head"><div><small>${esc(x.repairId)}</small><h2>${esc(x.product||'Chi tiết đơn')}</h2></div><button onclick="closeModal()">×</button></div><div class="detail-grid"><span>Khách<b>${esc(x.customer||'')}</b></span><span>SĐT<b>${esc(x.phone||'')}</b></span><span>IMEI<b>${esc(x.imei||'')}</b></span><span>Trạng thái<b>${esc(statusName(x.status))}</b></span><span>Kỹ thuật<b>${esc(x.technician||'Chưa gán')}</b></span><span>Dịch vụ<b>${esc(x.repairService||'')}</b></span><span>Hẹn trả<b>${esc(dateTime(x.appointment)||'--')}</b></span>${['admin','department_head','store'].includes(USER.role)?`<span>Thu khách<b>${fmtMoney(x.actualRevenue||0)}</b></span>`:''}</div>`)});}
@@ -145,5 +201,19 @@ function editCost(id){dashboardApi({action:'getDetail',repairId:id}).then(r=>{co
 function saveCost(id){dashboardApi({action:'updateCost',repairId:id,data:{materials:[{name:document.getElementById('cMat').value,qty:1,unitPrice:parseMoneyValue(document.getElementById('cMatCost').value),amount:parseMoneyValue(document.getElementById('cMatCost').value)}],laborCost:parseMoneyValue(document.getElementById('cLabor').value),actualRevenue:parseMoneyValue(document.getElementById('cRevenue').value)}}).then(r=>{if(r.success===false)return;closeModal();showToast('Đã cập nhật chi phí');refreshCurrent()})}
 function showModal(html){document.getElementById('modalRoot').innerHTML=`<div class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal-sheet">${html}</div></div>`;document.body.classList.add('modal-open')}
 function closeModal(){document.getElementById('modalRoot').innerHTML='';document.body.classList.remove('modal-open')}
+
+const TAB_LOADERS = {overview:loadAdminOverview,progress:loadProgress,services:loadServiceAnalytics,customers:loadCustomerAnalytics,weekly:loadWeeklyAnalytics,repairs:loadRepairList,cost:loadCostList};
+function trackTab(tab){
+  if(tab==='services'||tab==='customers')captureAnalytics(tab==='services'?'svc':'cust');
+  const key=readKey(tabPayload(tab)), epoch=CACHE_EPOCH, el=document.getElementById(tab), ready=TAB_READY.get(tab);
+  const previous=ready&&ready.key===key?el.innerHTML:null;
+  const request=TAB_LOADERS[tab](), ticket=TAB_TICKETS.get(tab);
+  // Keep the same filtered view visible while expired data refreshes in the background.
+  if(previous!==null)el.innerHTML=previous;
+  return Promise.resolve(request).then(()=>{
+    if(epoch===CACHE_EPOCH&&currentTabLoad(tab,ticket)&&key===readKey(tabPayload(tab))&&el&&!el.innerHTML.includes('v15-error')&&!el.innerHTML.includes('v15-skeletons'))TAB_READY.set(tab,{key,at:Date.now()});
+  });
+}
+loadAdminOverview=()=>trackTab('overview');loadProgress=()=>trackTab('progress');loadServiceAnalytics=()=>trackTab('services');loadCustomerAnalytics=()=>trackTab('customers');loadWeeklyAnalytics=()=>trackTab('weekly');loadRepairList=()=>trackTab('repairs');loadCostList=()=>trackTab('cost');
 
 document.addEventListener('DOMContentLoaded',initDashboard);
