@@ -68,7 +68,7 @@ const DEFAULTS = {
   CHAM_CONG_THO: [['Tháng', 'Kỹ thuật', 'Ngày', 'Trạng thái', 'Ghi chú', 'Ngày cập nhật', 'Người nhập']]
 };
 
-const API_VERSION = '15.4';
+const API_VERSION = '16.0';
 
 function canonicalAction_(value) {
   const raw = String(value || '').trim();
@@ -108,13 +108,14 @@ function apiInfo_() {
     success: true,
     version: API_VERSION,
     periodFiltering: true,
+    operationsOnly: true,
     supportedActions: [
       'login','getMasters','createRepair','search','getDetail','bootstrap',
       'adminOverview','progressList','repairListPaged','serviceAnalytics',
       'serviceTypeAnalytics','weeklyAnalytics','list','getDashboard',
       'updateStatus','quickStatus','updateCost','createTechWork',
       'createSentRepair','updateSentRepair','backfillOldDataToCT',
-      'unlockRepair','fixMoneyDateColumns','apiInfo','systemCheck','dashboardBatch'
+      'unlockRepair','fixMoneyDateColumns','apiInfo','systemCheck','dashboardBatch','operationsOverview','operationsList','updateLocation'
     ]
   };
 }
@@ -143,19 +144,22 @@ function doPost(e) {
     if (authError) return json(authError);
 
     if (action === 'dashboardBatch') return json(dashboardBatch_(body,session));
-    if (action === 'bootstrap') return json({ success: true, data: getBootstrapForSession_(session) });
+    if (action === 'operationsOverview') return json(operationsOverview_(body,session));
+    if (action === 'operationsList') return json(operationsList_(body,session));
+    if (action === 'updateLocation') return json(updateLocation_(body.repairId,withSession_(body.data||{},session)));
+    if (action === 'bootstrap') return json(operationsOverview_(body,session));
     if (action === 'systemCheck') return json(systemCheck_(session));
-    if (action === 'adminOverview') return json(adminOverview_(body, session));
+    if (action === 'adminOverview') return json(operationsOverview_(body, session));
     if (action === 'progressList') return json(progressList_(body, session));
     if (action === 'repairListPaged') return json(repairListPaged_(body, session));
     if (action === 'serviceAnalytics') return json(serviceAnalytics_(body, session));
     if (action === 'serviceTypeAnalytics') return json(serviceTypeAnalytics_(body, session));
-    if (action === 'weeklyAnalytics') return json(weeklyAnalytics_(body, session));
-    if (action === 'list') return json({ success: true, data: listRepairsForRole_(session.role) });
-    if (action === 'getDashboard') return json({ success: true, data: getDashboardForSession_(session) });
+    if (action === 'weeklyAnalytics') return json({success:false,message:'Ứng dụng này chỉ quản lý tiến độ và bàn giao máy.'});
+    if (action === 'list') return json(operationsList_(body,session));
+    if (action === 'getDashboard') return json(operationsOverview_(body,session));
     if (action === 'updateStatus') return json(updateStatus(body.repairId, withSession_(body.data || {}, session)));
     if (action === 'quickStatus') return json(updateStatus(body.repairId, withSession_(body.data || {}, session)));
-    if (action === 'updateCost') return json(updateCost(body.repairId, withSession_(body.data || {}, session)));
+    if (action === 'updateCost') return json({success:false,message:'Ứng dụng này chỉ quản lý tiến độ và bàn giao máy.'});
     if (action === 'createTechWork') return json(createTechWork(withSession_(body.data || {}, session)));
     if (action === 'createSentRepair') return json(createSentRepair(withSession_(body.data || {}, session)));
     if (action === 'updateSentRepair') return json(updateSentRepair(body.rowNumber, withSession_(body.data || {}, session)));
@@ -193,7 +197,8 @@ function systemCheck_(session) {
 function login_(body) {
   const username = String(body.username || '').trim();
   const password = String(body.password || '').trim();
-  const account = USER_ACCOUNTS[username];
+  let account = USER_ACCOUNTS[username];
+  if(username==='cskh'){const chosen=PropertiesService.getScriptProperties().getProperty('REPAIR_CSKH_PASSWORD');if(chosen)account={password:chosen,role:'cskh',name:'CSKH',home:'overview'};}
   if (!account || String(account.password) !== password) {
     return { success: false, message: 'Sai tài khoản hoặc mật khẩu.' };
   }
@@ -455,7 +460,7 @@ function getBootstrapForSession_(session) {
 
 function getMasters() {
   return {
-    trangThai: readSingle(SHEETS.DM_TRANG_THAI),
+    trangThai: DEFAULTS.DM_TRANG_THAI.slice(1),
     loaiDichVu: readSingle(SHEETS.DM_LOAI_DICH_VU),
     dichVu: readObjects(SHEETS.DM_DICH_VU).map(function (x) { return { name: pick_(x, ['Tên dịch vụ', 'Dịch vụ']), group: pick_(x, ['Nhóm dịch vụ', 'Nhóm']) }; }).filter(function (x) { return x.name; }),
     vatTu: readObjects(SHEETS.DM_VAT_TU).map(function (x) { return { name: pick_(x, ['Tên vật tư', 'Vật tư']), group: pick_(x, ['Nhóm vật tư', 'Nhóm']) }; }).filter(function (x) { return x.name; }),
@@ -565,6 +570,7 @@ function rowToObj(r, m) {
     staff: v(['Nhân viên tiếp nhận', 'Nhân viên', 'Người tiếp nhận']),
     repairService: v(['Dịch vụ sửa chữa', 'Dịch vụ', 'DV sửa chữa']),
     place: v(['Nơi xử lý', 'Đơn vị xử lý']),
+    location: v(['Vị trí máy']),
     technician: v(['Kỹ thuật xử lý', 'Kỹ thuật', 'KTV']),
     status: v(['Trạng thái máy', 'Trạng thái', 'Tình trạng xử lý']),
     completedDate: v(['Ngày hoàn thành', 'Ngày sửa xong']),
@@ -837,7 +843,7 @@ function findRow(id) {
 }
 
 function updateStatus(id, d) {
-  const roleCheck = requireRole_({ role: String((d && d.userRole) || '') }, ['tech', 'tech_manager', 'department_head', 'admin']);
+  const roleCheck = requireRole_({ role: String((d && d.userRole) || '') }, ['tech', 'store', 'tech_manager', 'department_head', 'admin']);
   if (roleCheck) return roleCheck;
   const sheet = sh(SHEETS.DATA);
   const row = findRow(id);
@@ -857,8 +863,12 @@ function updateStatus(id, d) {
   const old = rowToObj(rowValues, m) || {};
   const oldStatus = String(old.status || '');
   const newStatus = String(d.status || old.status || '');
+  if(d.status&&DEFAULTS.DM_TRANG_THAI.slice(1).indexOf(d.status)<0)return {success:false,message:'Trạng thái không hợp lệ.'};
+  if(role==='tech'&&old.technician&&normText_(old.technician)!==normText_(actor))return {success:false,message:'Đơn được giao cho kỹ thuật khác.'};
+  if(role==='tech'&&newStatus.startsWith('8.'))return {success:false,message:'Cửa hàng xác nhận trả khách sau khi nhận lại máy.'};
   const stamp = nowText();
 
+  if(newStatus.startsWith('8.')&&old.location!=='Tại cửa hàng chờ trả')return {success:false,message:'Cần xác nhận máy đã về cửa hàng trước khi trả khách.'};
   if (oldStatus.startsWith('8.') && role !== 'admin') {
     return { success: false, message: 'Đơn đã trả khách, dữ liệu đã khóa. Chỉ Admin được mở khóa/sửa.' };
   }
@@ -872,12 +882,15 @@ function updateStatus(id, d) {
     if (!newStatus.startsWith('8.')) {
       return { success: false, message: 'QL cửa hàng chỉ được cập nhật trạng thái Đã trả khách.' };
     }
+    if(opsCode_(old.status)!==7)return {success:false,message:'Máy chưa ở trạng thái Đã sửa xong.'};
+    if(old.location!=='Tại cửa hàng chờ trả')return {success:false,message:'Cần xác nhận máy đã về cửa hàng trước khi trả khách.'};
+    put('Vị trí máy','Đã trả khách');
     put('Trạng thái máy', '8. Đã trả khách');
     put('Ngày bàn giao', stamp);
     put('Ngày cập nhật', stamp);
     rowRange.setValues([rowValues]);
     addLog(id, actor || 'QL cửa hàng', 'Đã trả khách', 'QL cửa hàng xác nhận đã trả máy cho khách');
-    return { success: true, data: rowToObj(rowValues, m), services: [] };
+    return { success: true, data: sanitizeRepairForRole_(rowToObj(rowValues,m),role), services: [] };
   }
 
   const services = normalizeServices(d, old);
@@ -896,14 +909,14 @@ function updateStatus(id, d) {
   put('Ghi chú kỹ thuật', d.techNote !== undefined ? d.techNote : (old.techNote || ''));
   put('Trễ hẹn', calcOverdueValue_(old.appointment));
   if (newStatus.startsWith('7.')) put('Ngày hoàn thành', old.completedDate || stamp);
-  if (newStatus.startsWith('8.')) put('Ngày bàn giao', old.handoverDate || stamp);
+  if (newStatus.startsWith('8.')) {put('Ngày bàn giao', old.handoverDate || stamp);put('Vị trí máy','Đã trả khách');}
   put('Ngày cập nhật', stamp);
 
   rowRange.setValues([rowValues]);
   writeCtServicesFast_(id, services, d.technician || actor || old.technician || '');
   addLog(id, actor || d.technician || old.technician || 'Kỹ thuật', 'Cập nhật trạng thái', newStatus + (serviceText ? ' | DV: ' + serviceText : '') + (d.techNote ? ' | ' + d.techNote : ''));
 
-  return { success: true, data: rowToObj(rowValues, m), services: services };
+  return { success: true, data: sanitizeRepairForRole_(rowToObj(rowValues,m),role), services: services };
 }
 
 function calcOverdueValue_(appointment) {
@@ -1085,11 +1098,11 @@ function getDetail(id) {
 }
 
 function logsFor(id) {
-  return readObjects(SHEETS.LOG).filter(function (x) { return x['Mã sửa chữa'] === id; }).map(function (x) { return { id: x.ID, repairId: x['Mã sửa chữa'], time: x['Thời gian'], user: x['Người thực hiện'], action: x['Hành động'], content: x['Nội dung'] }; });
+  return readObjectsByRepair_(SHEETS.LOG,id).map(function (x) { return { id: x.ID, repairId: x['Mã sửa chữa'], time: x['Thời gian'], user: x['Người thực hiện'], action: x['Hành động'], content: x['Nội dung'] }; });
 }
 
 function ctFor(sheetName, id) {
-  return readObjects(sheetName).filter(function (x) { return x['Mã sửa chữa'] === id; });
+  return readObjectsByRepair_(sheetName,id);
 }
 
 function addLog(id, user, action, content) {
@@ -1535,7 +1548,7 @@ function clearSheetBody_(sheet) {
 function getMastersForV15_(session) {
   // V15 chỉ lấy danh mục thực sự dùng trên mobile, tránh tải hoa hồng/vật tư/NCC không cần thiết.
   return {
-    trangThai: readSingle(SHEETS.DM_TRANG_THAI),
+    trangThai: DEFAULTS.DM_TRANG_THAI.slice(1),
     loaiDichVu: readSingle(SHEETS.DM_LOAI_DICH_VU),
     dichVu: readObjects(SHEETS.DM_DICH_VU).map(function (x) { return { name: pick_(x, ['Tên dịch vụ','Dịch vụ']), group: pick_(x, ['Nhóm dịch vụ','Nhóm']) }; }).filter(function(x){ return x.name; }),
     kyThuat: readObjects(SHEETS.DM_KY_THUAT).map(function (x) { return { name: pick_(x, ['Tên kỹ thuật','Kỹ thuật','Tên nhân viên']), branch: pick_(x, ['Chi nhánh','CN']), status: pick_(x, ['Trạng thái']) }; }).filter(function(x){ return x.name; }),
@@ -1548,25 +1561,20 @@ function getPublicMasters_() {
   return { trangThai: m.trangThai || [], loaiDichVu: m.loaiDichVu || [], dongMay: m.dongMay || [], nhanVien: m.nhanVien || [] };
 }
 
-function sanitizeRepairForRole_(r, role) {
-  if (!r) return r;
-  const x = Object.assign({}, r);
-  role = String(role || '');
-  if (role === 'store') {
-    // Cửa hàng chỉ cần số khách phải/đã thanh toán; không lộ cấu phần chi phí/lợi nhuận.
-    ['materialCost','laborCost','totalCost','profit','ncc','billCode','paymentStatus'].forEach(function(k){ delete x[k]; });
-  } else if (role === 'tech' || role === 'tech_manager') {
-    ['materialCost','laborCost','totalCost','actualRevenue','profit','ncc','billCode','paymentStatus'].forEach(function(k){ delete x[k]; });
-  }
-  return x;
+function sanitizeRepairForRole_(r,role){
+ if(!r)return r;const x=Object.assign({},r);
+ ['estimate','materialCost','laborCost','totalCost','actualRevenue','profit','ncc','billCode','paymentStatus'].forEach(function(k){delete x[k];});return x;
 }
 
 function getDetailForSession_(id, session) {
   const d = getDetail(id);
+  if(d.success===false)return d;
+  d.logs=(d.logs||[]).filter(function(x){return /trạng thái|Bàn giao|Tiếp nhận|trả khách/i.test(x.action||'');});
   const role = String(session && session.role || '');
   d.data = sanitizeRepairForRole_(d.data, role);
-  if (role === 'store' || role === 'tech' || role === 'tech_manager') d.materials = [];
-  if (role === 'store') d.logs = [];
+  d.materials=[];d.services=[];
+  if(d.data&&role==='tech'&&d.data.technician&&normText_(d.data.technician)!==normText_(session.name))return {success:false,message:'Đơn được giao cho kỹ thuật khác.'};
+  if(role==='cskh'){d.logs=[];d.services=[];}
   return d;
 }
 
@@ -1632,7 +1640,7 @@ function filterRowsV15_(body, session, pendingOnly) {
   const role=String(session.role||'');
   if(role==='tech') { const k=normText_(session.name||''); rows=rows.filter(function(r){return normText_(r.technician||'')===k;}); }
   const bounds=periodBounds_(body);
-  rows=rows.filter(function(r){const d=parseV15Date_(r.date);return inV15Range_(r,bounds.from,bounds.to)||(body.includePending===true&&isPendingV15_(r)&&(!d||d<=bounds.end));});
+  rows=rows.filter(function(r){const d=parseV15Date_(r.date);return inV15Range_(r,bounds.from,bounds.to)||(body.includePending===true&&isOutstandingOps_(r)&&(!d||d<=bounds.end));});
   if(pendingOnly) rows=rows.filter(isPendingV15_);
   if(body.technician) { const k=normText_(body.technician); rows=rows.filter(function(r){return normText_(r.technician||'')===k;}); }
   if(body.branch) { const k=normText_(body.branch); rows=rows.filter(function(r){return normText_(r.branch||'')===k;}); }
@@ -1700,7 +1708,7 @@ function weeklyAnalytics_(body, session){
 function dashboardBatch_(body,session){
   const requests=body.requests;
   if(!Array.isArray(requests)||requests.length>7)return {success:false,message:'Batch tối đa 7 yêu cầu đọc.'};
-  const handlers={adminOverview:adminOverview_,progressList:progressList_,repairListPaged:repairListPaged_,serviceAnalytics:serviceAnalytics_,serviceTypeAnalytics:serviceTypeAnalytics_,weeklyAnalytics:weeklyAnalytics_};
+  const handlers={operationsOverview:operationsOverview_,operationsList:operationsList_};
   BATCH_READ_ACTIVE_=true;BATCH_REPAIR_ROWS_=null;
   try{return {success:true,data:requests.map(function(req){
     const action=String(req&&req.action||'');
@@ -1724,9 +1732,10 @@ function periodIndex_(){
  const dates=periodColumns_(map,['Ngày nhận','Ngày tiếp nhận','Dấu thời gian']);
  const statuses=periodColumns_(map,['Trạng thái máy','Trạng thái','Tình trạng xử lý']);
  if(!dates.length||!statuses.length)throw new Error('DATA thiếu cột Ngày nhận hoặc Trạng thái.');
- const values={};dates.concat(statuses).forEach(function(c){if(!values[c])values[c]=sheet.getRange(2,c+1,last-1,1).getValues();});
+ const locations=periodColumns_(map,['Vị trí máy']);
+ const values={};dates.concat(statuses,locations).forEach(function(c){if(!values[c])values[c]=sheet.getRange(2,c+1,last-1,1).getValues();});
  function valueAt(cols,i){for(let j=0;j<cols.length;j++){const v=values[cols[j]][i][0];if(v!==''&&v!==null&&v!==undefined)return v;}return '';}
- const rows=[];for(let i=0;i<last-1;i++)rows.push({row:i+2,date:valueAt(dates,i),status:valueAt(statuses,i)});
+ const rows=[];for(let i=0;i<last-1;i++)rows.push({row:i+2,date:valueAt(dates,i),status:valueAt(statuses,i),location:valueAt(locations,i)});
  return PERIOD_INDEX_={sheet:sheet,map:map,width:width,rows:rows};
 }
 function periodBounds_(body){
@@ -1736,7 +1745,7 @@ function periodBounds_(body){
 function readPeriodRepairs_(body){
  const bounds=periodBounds_(body), key=String(bounds.from)+'|'+String(bounds.to)+'|'+String(body.includePending===true);
  if(PERIOD_ROWS_[key])return PERIOD_ROWS_[key];
- const index=periodIndex_(),selected=index.rows.filter(function(r){const d=parseV15Date_(r.date);return (d&&d>=bounds.start&&d<=bounds.end)||(body.includePending===true&&isPendingV15_(r)&&(!d||d<=bounds.end));});
+ const index=periodIndex_(),selected=index.rows.filter(function(r){const d=parseV15Date_(r.date);return (d&&d>=bounds.start&&d<=bounds.end)||(body.includePending===true&&isOutstandingOps_(r)&&(!d||d<=bounds.end));});
  const groups=[];selected.filter(function(r){return !PERIOD_OBJECTS_[r.row];}).forEach(function(r){let g=groups[groups.length-1];if(!g||r.row-g.end>8){g={start:r.row,end:r.row,selected:{}};groups.push(g);}g.end=r.row;g.selected[r.row]=true;});
  groups.forEach(function(g){index.sheet.getRange(g.start,1,g.end-g.start+1,index.width).getValues().forEach(function(row,i){if(!g.selected[g.start+i])return;const obj=rowToObj(row,index.map);PERIOD_OBJECTS_[g.start+i]=obj;});});
  return PERIOD_ROWS_[key]=selected.map(function(r){return PERIOD_OBJECTS_[r.row];}).filter(function(r){return r&&r.repairId;}).reverse();
@@ -1755,3 +1764,58 @@ function readPeriodMaterials_(repairMap){
  ids.forEach(function(v,i){if(!repairMap[String(v[0]||'')])return;const row=i+2;let g=groups[groups.length-1];if(!g||row-g.end>8){g={start:row,end:row};groups.push(g);}g.end=row;});
  const out=[];groups.forEach(function(g){sheet.getRange(g.start,1,g.end-g.start+1,width).getValues().forEach(function(row){if(!repairMap[String(row[id]||'')])return;const x={};headers.forEach(function(h,i){x[h]=row[i];});if(x['Tên vật tư'])out.push({repairId:x['Mã sửa chữa'],name:x['Tên vật tư'],qty:Number(x['SL']||1)});});});return out;
 }
+
+const OPS_LOCATIONS_=['Tại cửa hàng tiếp nhận','Đang chuyển đến kỹ thuật','Tại kỹ thuật','Đang chuyển về cửa hàng','Tại cửa hàng chờ trả','Đã trả khách'];
+function opsCode_(status){const m=String(status||'').match(/^\s*(\d+)/);return m?Number(m[1]):0;}
+function isOutstandingOps_(r){const n=opsCode_(r.status);if(r.location==='Đã trả khách'||n===8)return false;if(n===9||n===11)return !!r.location;return n>=1&&n<=10;}
+function operationRows_(body,session){
+ const b=Object.assign({},body,{includePending:true}),bounds=periodBounds_(b);
+ let rows=readPeriodRepairs_(b).filter(function(r){return inV15Range_(r,bounds.from,bounds.to)||(isOutstandingOps_(r)&&(!parseV15Date_(r.date)||parseV15Date_(r.date)<=bounds.end));});
+ if(session.role==='tech')rows=rows.filter(function(r){return !r.technician||normText_(r.technician)===normText_(session.name);});return rows;
+}
+function operationsOverview_(body,session){
+ const rows=operationRows_(body,session),statuses={},locations={};let pending=0,repairing=0,ready=0,overdue=0,unassigned=0;
+ rows.forEach(function(r){if(!isOutstandingOps_(r))return;pending++;const n=opsCode_(r.status);statuses[n]=(statuses[n]||0)+1;const loc=r.location||'Chưa cập nhật';locations[loc]=(locations[loc]||0)+1;if(n===7)ready++;else repairing++;if(!r.technician)unassigned++;if(isOverdueOps_(r))overdue++;});
+ return {success:true,data:{received:rows.filter(function(r){return inV15Range_(r,body.from,body.to);}).length,pending:pending,repairing:repairing,ready:ready,overdue:overdue,unassigned:unassigned,statuses:statuses,locations:locations}};
+}
+function operationsList_(body,session){
+ let rows=operationRows_(body,session);
+ if(body.onlyOutstanding===true)rows=rows.filter(isOutstandingOps_);
+ if(body.q)rows=rows.filter(function(r){return matchesQueryV15_(r,body.q);});
+ if(body.status==='overdue')rows=rows.filter(function(r){return isOverdueOps_(r);});
+ else if(body.status==='unassigned')rows=rows.filter(function(r){return isOutstandingOps_(r)&&!r.technician;});
+ else if(body.status)rows=rows.filter(function(r){return opsCode_(r.status)===Number(body.status);});
+ if(body.location)rows=rows.filter(function(r){return (r.location||'Chưa cập nhật')===body.location;});
+ if(body.technician)rows=rows.filter(function(r){return normText_(r.technician)===normText_(body.technician);});
+ const out=pageV15_(rows,body,session);out.success=true;return out;
+}
+function updateLocation_(id,d){
+ const error=requireRole_({role:d.userRole},['store','tech','tech_manager','department_head','admin']);if(error)return error;
+ const loc=String(d.location||'');if(OPS_LOCATIONS_.indexOf(loc)<0)return {success:false,message:'Vị trí máy không hợp lệ.'};
+ const sheet=sh(SHEETS.DATA),row=findRow(id);if(row<2)return {success:false,message:'Không tìm thấy đơn.'};
+ let m=mapHeader(SHEETS.DATA),values=sheet.getRange(row,1,1,sheet.getLastColumn()).getValues()[0],old=rowToObj(values,m);
+ if(opsCode_(old.status)===8||old.location==='Đã trả khách')return {success:false,message:'Đơn đã trả khách.'};
+ if(d.userRole==='tech'&&old.technician&&normText_(old.technician)!==normText_(d.actor))return {success:false,message:'Đơn được giao cho kỹ thuật khác.'};
+ if(loc==='Đã trả khách'){
+   if(d.userRole==='tech')return {success:false,message:'Cửa hàng xác nhận trả khách.'};
+   if(old.location!=='Tại cửa hàng chờ trả'||[7,9,11].indexOf(opsCode_(old.status))<0)return {success:false,message:'Cần xác nhận máy đã về cửa hàng và đã sửa xong/back/hủy trước khi trả khách.'};
+ }
+ if(d.userRole==='store'&&['Tại cửa hàng tiếp nhận','Đang chuyển đến kỹ thuật','Tại cửa hàng chờ trả','Đã trả khách'].indexOf(loc)<0)return {success:false,message:'Cửa hàng chỉ xác nhận gửi máy, nhận về và trả khách.'};
+ if(['Đang chuyển về cửa hàng','Tại cửa hàng chờ trả'].indexOf(loc)>=0&&[7,9,11].indexOf(opsCode_(old.status))<0)return {success:false,message:'Máy chưa sửa xong/back/hủy để gửi về.'};
+ if(m['Vị trí máy']===undefined){const col=sheet.getLastColumn()+1;sheet.getRange(1,col).setValue('Vị trí máy');m['Vị trí máy']=col-1;values[col-1]='';}
+ values[m['Vị trí máy']]=loc;
+ if(d.userRole==='tech'&&!old.technician&&m['Kỹ thuật xử lý']!==undefined)values[m['Kỹ thuật xử lý']]=d.actor;
+ if(loc==='Đã trả khách'&&opsCode_(old.status)===7){if(m['Trạng thái máy']!==undefined)values[m['Trạng thái máy']]='8. Đã trả khách';if(m['Ngày bàn giao']!==undefined)values[m['Ngày bàn giao']]=nowText();}
+ if(m['Ngày cập nhật']!==undefined)values[m['Ngày cập nhật']]=nowText();
+ sheet.getRange(row,1,1,values.length).setValues([values]);addLog(id,d.actor||d.sessionUser,'Bàn giao máy',(old.location||'Chưa cập nhật')+' → '+loc);
+ return {success:true,data:sanitizeRepairForRole_(rowToObj(values,m),d.userRole)};
+}
+
+function readObjectsByRepair_(name,id){
+ const sheet=sh(name),last=sheet.getLastRow(),width=sheet.getLastColumn();if(last<2)return [];
+ const headers=sheet.getRange(1,1,1,width).getValues()[0].map(function(x){return String(x||'').trim();}),col=headers.indexOf('Mã sửa chữa');if(col<0)return [];
+ const ids=sheet.getRange(2,col+1,last-1,1).getValues(),groups=[];ids.forEach(function(v,i){if(String(v[0])!==String(id))return;const row=i+2;let g=groups[groups.length-1];if(!g||row-g.end>8){g={start:row,end:row};groups.push(g);}g.end=row;});
+ const out=[];groups.forEach(function(g){sheet.getRange(g.start,1,g.end-g.start+1,width).getValues().forEach(function(row){if(String(row[col])!==String(id))return;const x={};headers.forEach(function(h,i){if(h)x[h]=row[i];});out.push(x);});});return out;
+}
+
+function isOverdueOps_(r){if(!isOutstandingOps_(r))return false;const d=parseV15Date_(r.appointment);return d?v15DayEnd_(d).getTime()<Date.now():String(r.overdue||'').toLowerCase()==='có';}
