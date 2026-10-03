@@ -1,4 +1,4 @@
-const SHEET_ID = '1ZsLoZF4hVBpSrbna0sZQ-lg9KNI-TkwuUYmiJP885mo'; // DATA chính POPOPHONE
+const SHEET_ID = '1c8koIyn3NPwPoJJCy_N7g69Eg8z2Rm89iZdMYZmEP3M'; // DATA chính POPOPHONE
 const TZ = 'GMT+7';
 
 const SHEETS = {
@@ -68,7 +68,7 @@ const DEFAULTS = {
   CHAM_CONG_THO: [['Tháng', 'Kỹ thuật', 'Ngày', 'Trạng thái', 'Ghi chú', 'Ngày cập nhật', 'Người nhập']]
 };
 
-const API_VERSION = '16.5';
+const API_VERSION = '16.7';
 
 function canonicalAction_(value) {
   const raw = String(value || '').trim();
@@ -847,7 +847,11 @@ function findRow(id) {
   return idx >= 0 ? idx + 2 : -1;
 }
 
-function updateStatus(id, d) {
+function updateStatus(id,d){
+ const lock=LockService.getScriptLock();if(!lock.tryLock(5000))return {success:false,message:'Đơn đang được cập nhật. Vui lòng thử lại.'};
+ try{return updateStatusLocked_(id,d);}finally{lock.releaseLock();}
+}
+function updateStatusLocked_(id, d) {
   const roleCheck = requireRole_({ role: String((d && d.userRole) || '') }, ['tech', 'store', 'tech_manager', 'department_head', 'admin']);
   if (roleCheck) return roleCheck;
   const sheet = sh(SHEETS.DATA);
@@ -867,8 +871,11 @@ function updateStatus(id, d) {
   const rowValues = rowRange.getValues()[0];
   const old = rowToObj(rowValues, m) || {};
   const oldStatus = String(old.status || '');
-  if(String(d.status||'').startsWith('8.')&&!getOpsTracking_(id).storeReceivedAt)return {success:false,message:'Cửa hàng cần xác nhận đã nhận máy về trước khi trả khách.'};
   const newStatus = String(d.status || old.status || '');
+  if([8,9,10,11].indexOf(opsCode_(newStatus))>=0&&newStatus!==oldStatus){
+    if(opsCode_(oldStatus)!==7)return {success:false,message:'Cần chuyển về 7. Đã sửa xong trước khi kết thúc đơn.'};
+    if(!getOpsTracking_(id).storeReceivedAt)return {success:false,message:'Cần CH nhận trước khi cập nhật trạng thái 8–11.'};
+  }
   if(d.status&&DEFAULTS.DM_TRANG_THAI.slice(1).indexOf(d.status)<0)return {success:false,message:'Trạng thái không hợp lệ.'};
   if(role==='tech'&&old.technician&&normText_(old.technician)!==normText_(actor))return {success:false,message:'Đơn được giao cho kỹ thuật khác.'};
   if(role==='tech'&&newStatus.startsWith('8.'))return {success:false,message:'Cửa hàng xác nhận trả khách sau khi nhận lại máy.'};
@@ -885,16 +892,13 @@ function updateStatus(id, d) {
   }
 
   if (role === 'store') {
-    if (!newStatus.startsWith('8.')) {
-      return { success: false, message: 'QL cửa hàng chỉ được cập nhật trạng thái Đã trả khách.' };
-    }
-    if([7,9,11].indexOf(opsCode_(old.status))<0)return {success:false,message:'Máy chưa sửa xong/back/hủy để trả khách.'};
-    put('Trạng thái máy', '8. Đã trả khách');
-    put('Ngày bàn giao', stamp);
-    put('Ngày cập nhật', stamp);
-    rowRange.setValues([rowValues]);
-    addLog(id, actor || 'QL cửa hàng', 'Đã trả khách', JSON.stringify({type:'STATUS',fromStatus:oldStatus,toStatus:'8. Đã trả khách',message:'Cửa hàng xác nhận đã trả máy cho khách'}));invalidateOpsData_();
-    return { success: true, data: sanitizeRepairForRole_(rowToObj(rowValues,m),role), services: [] };
+    if([8,9,10,11].indexOf(opsCode_(newStatus))<0)return {success:false,message:'Cửa hàng chỉ cập nhật trạng thái kết thúc 8–11 sau CH nhận.'};
+    if(newStatus===oldStatus)return {success:true,data:sanitizeRepairForRole_(old,role)};
+    put('Trạng thái máy',newStatus);
+    if(opsCode_(newStatus)===8)put('Ngày bàn giao',stamp);
+    put('Ngày cập nhật',stamp);rowRange.setValues([rowValues]);
+    addLog(id,actor||'Cửa hàng','Cập nhật trạng thái',JSON.stringify({type:'STATUS',fromStatus:oldStatus,toStatus:newStatus,message:'Cửa hàng cập nhật sau CH nhận'}));invalidateOpsData_();
+    return {success:true,data:sanitizeRepairForRole_(rowToObj(rowValues,m),role),services:[]};
   }
 
   const previous=readOpsServices_(id,old.repairService);
@@ -930,6 +934,7 @@ function updateStatus(id, d) {
   put('Ngày cập nhật', stamp);
 
   rowRange.setValues([rowValues]);
+  if(newStatus!==oldStatus&&opsCode_(newStatus)<=7)clearStoreReceipt_(id);
   invalidateOpsData_();
   writeCtServicesFast_(id, services, d.technician || actor || old.technician || '');
   addLog(id, actor || d.technician || old.technician || 'Kỹ thuật', 'Cập nhật trạng thái', JSON.stringify({type:'STATUS',fromStatus:oldStatus,toStatus:newStatus,message:'Dịch vụ trước: '+(old.repairService||'Chưa có')+'; Dịch vụ thực tế: '+(serviceText||'Chưa có')}));
@@ -1802,19 +1807,29 @@ function operationsOverview_(body,session){
  receivedToday.forEach(function(r){const n=opsCode_(r.status);todayStatuses[n]=(todayStatuses[n]||0)+1;});
  const late=pending.filter(isOverdueOps_).sort(function(a,b){return (parseV15Date_(a.appointment)||0)-(parseV15Date_(b.appointment)||0);});
  function arr(map){return Object.keys(map).map(function(k){return map[k];}).sort(function(a,b){return b.pending-a.pending||b.total-a.total;});}
- return {success:true,data:{periodTotal:month.length,pending:pending.length,receivedToday:receivedToday.length,returnedToday:returnedToday.length,receivedTodayPending:receivedToday.filter(isOutstandingOps_).length,todayLabel:today,todayStatuses:todayStatuses,technicians:arr(tech),branches:arr(branches),overdue:late.length,overdueRows:late.slice(0,20).map(function(r){return sanitizeRepairForRole_(r,session.role);}),branchOptions:Array.from(new Set(rows.map(function(r){return r.branch||'Chưa có chi nhánh';}))).sort()}};
+ return {success:true,data:{periodTotal:month.length,pending:pending.length,waitingStore:readOpsData_(false).filter(function(r){return isAwaitingStoreOps_(r)&&(session.role!=='tech'||!r.technician||normText_(r.technician)===normText_(session.name));}).length,receivedToday:receivedToday.length,returnedToday:returnedToday.length,receivedTodayPending:receivedToday.filter(isOutstandingOps_).length,todayLabel:today,todayStatuses:todayStatuses,technicians:arr(tech),branches:arr(branches),overdue:late.length,overdueRows:late.slice(0,20).map(function(r){return sanitizeRepairForRole_(r,session.role);}),branchOptions:Array.from(new Set(rows.map(function(r){return r.branch||'Chưa có chi nhánh';}))).sort()}};
 }
+function isAwaitingStoreOps_(r){return opsCode_(r.status)===7&&!(r.tracking||{}).storeReceivedAt;}
 function operationsList_(body,session){
  let rows=operationRows_(body,session);
  if(body.onlyOutstanding===true){const todayEnd=v15DayEnd_(parseV15Date_(Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd')));rows=rows.filter(function(r){const d=parseV15Date_(r.date);return isOutstandingOps_(r)&&(!d||d<=todayEnd);});}
- if(body.q)rows=rows.filter(function(r){return matchesQueryV15_(r,body.q);});
- if(body.status==='overdue')rows=rows.filter(isOverdueOps_);
+ function common(list){
+  if(body.q)list=list.filter(function(r){return matchesQueryV15_(r,body.q);});
+  if(body.branch)list=list.filter(function(r){return (r.branch||'Chưa có chi nhánh')===body.branch;});
+  if(body.technician)list=list.filter(function(r){return (r.technician||'Chưa gán')===body.technician;});
+  if(session.role==='tech')list=list.filter(function(r){return !r.technician||normText_(r.technician)===normText_(session.name);});
+  return list;
+ }
+ rows=common(rows);
+ if(body.todayOnly===true){const today=Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd');rows=rows.filter(function(r){return inV15Range_(r,today,today);});}
+ const statusCounts={},totalBeforeStatus=rows.length,overdueCount=rows.filter(isOverdueOps_).length,unassignedCount=rows.filter(function(r){return isOutstandingOps_(r)&&!r.technician;}).length;
+ rows.forEach(function(r){const n=opsCode_(r.status);statusCounts[n]=(statusCounts[n]||0)+1;});
+ const waiting=common(readOpsData_(false).filter(isAwaitingStoreOps_));
+ if(body.status==='waitingStore')rows=waiting;
+ else if(body.status==='overdue')rows=rows.filter(isOverdueOps_);
  else if(body.status==='unassigned')rows=rows.filter(function(r){return isOutstandingOps_(r)&&!r.technician;});
  else if(body.status)rows=rows.filter(function(r){return opsCode_(r.status)===Number(body.status);});
- if(body.branch)rows=rows.filter(function(r){return (r.branch||'Chưa có chi nhánh')===body.branch;});
- if(body.technician)rows=rows.filter(function(r){return (r.technician||'Chưa gán')===body.technician;});
- if(body.todayOnly===true){const today=Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd');rows=rows.filter(function(r){return inV15Range_(r,today,today);});}
- const out=pageV15_(rows,body,session);out.success=true;out.searchAllHistory=!!String(body.q||'').trim();out.branchOptions=Array.from(new Set(rows.map(function(r){return r.branch||'Chưa có chi nhánh';}))).sort();return out;
+ const out=pageV15_(rows,body,session);out.success=true;out.searchAllHistory=!!String(body.q||'').trim();out.statusCounts=statusCounts;out.totalBeforeStatus=totalBeforeStatus;out.overdueCount=overdueCount;out.unassignedCount=unassignedCount;out.waitingStoreCount=waiting.length;out.branchOptions=Array.from(new Set(rows.map(function(r){return r.branch||'Chưa có chi nhánh';}))).sort();return out;
 }
 
 
@@ -1837,7 +1852,7 @@ function readOpsData_(fresh){
  if(OPS_DATA_LOCAL_&&!fresh)return OPS_DATA_LOCAL_;
  let cache,revision='0',prefix;
  try{
-   cache=CacheService.getScriptCache();revision=PropertiesService.getScriptProperties().getProperty('OPS_DATA_REV')||'0';prefix='OPS165_'+revision;
+   cache=CacheService.getScriptCache();revision=PropertiesService.getScriptProperties().getProperty('OPS_DATA_REV')||'0';prefix='OPS167_'+revision;
    if(!fresh){const raw=cache.get(prefix);if(raw){const meta=JSON.parse(raw),keys=Array.from({length:meta.parts},function(_,i){return prefix+'_'+i;}),parts=cache.getAll(keys);if(keys.every(function(k){return parts[k];})){const encoded=keys.map(function(k){return parts[k];}).join('');return OPS_DATA_LOCAL_=JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(encoded))).getDataAsString());}}}
  }catch(e){}
  const sheet=sh(SHEETS.DATA),last=sheet.getLastRow(),width=sheet.getLastColumn();if(last<2)return OPS_DATA_LOCAL_=[];
@@ -1877,7 +1892,7 @@ function saveOpsTracking_(id,d){
   if(event!=='contact'&&opsCode_(old.status)===8)return {success:false,message:'Đơn đã trả khách.'};
   let action='',message='';
   if(event==='techReceived'){if(current.techReceivedAt)return {success:true,data:current};current.techReceivedAt=stamp;current.techReceivedBy=actor;action='Kỹ thuật đã nhận máy';message=actor+' xác nhận nhận máy';if(role==='tech'&&!old.technician&&map['Kỹ thuật xử lý']!==undefined)dataSheet.getRange(row,map['Kỹ thuật xử lý']+1).setValue(actor);}
-  if(event==='storeReceived'){if([7,9,11].indexOf(opsCode_(old.status))<0)return {success:false,message:'Máy chưa sửa xong/back/hủy để nhận về.'};if(current.storeReceivedAt)return {success:true,data:current};current.storeReceivedAt=stamp;current.storeReceivedBy=actor;action='Cửa hàng đã nhận máy về';message=actor+' xác nhận máy đã về '+(old.branch||'cửa hàng');}
+  if(event==='storeReceived'){if(opsCode_(old.status)!==7)return {success:false,message:'Chỉ CH nhận khi đơn ở 7. Đã sửa xong.'};if(current.storeReceivedAt)return {success:true,data:current};current.storeReceivedAt=stamp;current.storeReceivedBy=actor;action='Cửa hàng đã nhận máy về';message=actor+' xác nhận máy đã về '+(old.branch||'cửa hàng');}
   if(event==='customerInfo'){current.customerResult=String(d.customerResult||'').trim();current.waitingReason=String(d.waitingReason||'').trim();current.expectedFinish=String(d.expectedFinish||'').trim();action='Cập nhật thông tin báo khách';message=[current.customerResult,current.waitingReason?'Đang chờ: '+current.waitingReason:'',current.expectedFinish?'Dự kiến: '+current.expectedFinish:''].filter(Boolean).join(' · ');if(d.estimate!==undefined&&d.estimate!==''){const cols=periodColumns_(map,['Giá dự kiến','Giá báo dự kiến','Báo giá dự kiến']);if(!cols.length)return {success:false,message:'DATA thiếu cột báo giá.'};dataSheet.getRange(row,cols[0]+1).setValue(Number(d.estimate));}}
   if(event==='contact'){current.lastContactAt=stamp;current.lastContactBy=actor;current.lastContactNote=String(d.note||'').trim();current.lastContactChannel=String(d.channel||'').trim();action='Đã báo khách';message=(current.lastContactChannel?current.lastContactChannel+': ':'')+current.lastContactNote;}
   let sheet=ss().getSheetByName(OPS_TRACKING_SHEET_);if(!sheet){sheet=ss().insertSheet(OPS_TRACKING_SHEET_);sheet.getRange(1,1,1,OPS_TRACKING_HEADERS_.length).setValues([OPS_TRACKING_HEADERS_]);}
@@ -1904,4 +1919,10 @@ function relatedOpsRepairs_(current) {
   return {total:list.length,currentVisit:list.findIndex(function(r){return String(r.repairId)===String(current.repairId);})+1,rows:list.map(function(r,i){return {repairId:r.repairId,visit:i+1,date:r.date,imei:r.imei,customer:r.customer,product:r.product,branch:r.branch,technician:r.technician,status:r.status,repairService:r.repairService,request:r.request,estimate:r.estimate,handoverDate:r.handoverDate,result:(r.tracking||{}).customerResult||'',current:String(r.repairId)===String(current.repairId)};}).reverse()};
  }
  return {machine:imei?build(function(r){return String(r.imei||'').replace(/\s/g,'').toLowerCase()===imei;}):null,customer:phone?build(function(r){return historyPhone_(r.phone)===phone;}):null};
+}
+
+function clearStoreReceipt_(id){
+ const sheet=ss().getSheetByName(OPS_TRACKING_SHEET_);if(!sheet||sheet.getLastRow()<2)return;
+ const ids=sheet.getRange(2,1,sheet.getLastRow()-1,1).getValues(),i=ids.findIndex(function(r){return String(r[0])===String(id);});
+ if(i>=0)sheet.getRange(i+2,4,1,2).setValues([['','']]);
 }

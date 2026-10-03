@@ -1,88 +1,41 @@
-POPOPHONE V16.5 – NHẬN MÁY, BÁO KHÁCH VÀ LỊCH SỬ
+POPOPHONE V16.7
 
 TRIỂN KHAI
-1. Thay appscript/Code.gs, cập nhật deployment hiện tại: New version > Deploy.
-2. Deploy toàn bộ source Netlify, giữ URL /exec đang chạy.
-3. Ctrl+F5. Tài khoản hiện tại giữ nguyên.
-4. CSKH: username cskh, mật khẩu đặt trong Script properties REPAIR_CSKH_PASSWORD.
+Thay appscript/Code.gs và cập nhật deployment hiện tại bằng New version > Deploy.
+Deploy toàn bộ source Netlify, giữ URL /exec đang chạy. Tải lại trang.
+CSKH dùng tài khoản cskh; mật khẩu đặt ở REPAIR_CSKH_PASSWORD trong Script properties.
 
-GIAO DIỆN
-Chi nhánh lấy từ DATA, tô đỏ ở đầu mỗi thẻ.
-Thẻ ưu tiên IMEI và tên khách, sau đó dòng máy, thợ, hẹn trả, dịch vụ và báo giá.
-Không lấy mã sửa chữa làm tiêu đề. Mã vẫn dùng ngầm để liên kết đúng đơn,
-vì một IMEI có thể xuất hiện ở nhiều lần sửa hoặc bảo hành.
-Báo giá lấy Giá dự kiến / Giá báo dự kiến / Báo giá dự kiến trong DATA.
-Giá 0 được hiện đúng; cột trống hiện Chưa báo giá.
-Không hiện chi phí, lợi nhuận hay doanh thu.
+LUỒNG NHẬN VÀ KẾT THÚC
+Nút và nhãn rút gọn KT nhận, CH nhận.
+KT nhận ghi nhận máy thực tế, người nhận và thời gian.
+Kỹ thuật cập nhật 1–7 theo tiến độ. CH chỉ nhận khi trạng thái 7. Đã sửa xong.
+Sau CH nhận mới được chuyển từ 7 sang 8/9/10/11. API chặn bỏ qua bước,
+kể cả Admin; giao diện chỉ cho chọn trạng thái kết thúc khi đủ điều kiện.
+Cửa hàng/quản lý dùng Cập nhật 8–11 sau khi xác nhận CH nhận.
+Kỹ thuật vẫn không xác nhận 8. Đã trả khách; được 9–11 sau CH nhận.
+CH nhận chỉ ghi xác nhận, không tự đổi trạng thái hay tăng số trả hôm nay.
+Nếu đơn chuyển lại trạng thái 1–7 để xử lý, xác nhận CH cũ bị xóa; phải CH nhận
+lại ở trạng thái 7. Lịch sử bàn giao cũ trong LOG vẫn giữ.
+Đơn cũ kết thúc 8–11 không tự đổi dữ liệu, không tạo xác nhận bàn giao giả.
+Cập nhật trạng thái và xác nhận nhận dùng chung ScriptLock tránh cập nhật song song.
 
-NHẬN MÁY VÀ TRẢ KHÁCH
-Kỹ thuật bấm Nhận máy khi thực sự nhận được máy. Đơn chưa gán sẽ gán cho
-kỹ thuật xác nhận; lưu người nhận và thời gian. Không tự đổi trạng thái sửa.
-Cửa hàng bấm Nhận máy về sau khi nhận thực tế, ở trạng thái 7/9/11.
-Phải có xác nhận nhận về trước khi xác nhận trạng thái 8. Đã trả khách.
-Máy cũ chưa có xác nhận vẫn hiện Chưa xác nhận; không tự tạo lịch sử giả.
-Trạng thái 8, 9, 10, 11 đều kết thúc đơn khi thống kê; trạng thái 1–7 tính tồn.
+TỒN VÀ DANH SÁCH
+1–7 còn tồn; 8–11 kết thúc. Tổng quan cộng tồn kỳ trước.
+Máy còn tồn chỉ lấy tồn; Danh sách lấy mọi trạng thái trong kỳ. Tìm kiếm xuyên năm.
+Chờ CH nhận lấy mọi kỳ, chỉ trạng thái 7 chưa CH nhận.
+Trả hôm nay chỉ trạng thái 8 có ngày trả hôm nay.
+Các nút bo tròn có số đếm trước lọc trạng thái và phân trang, theo kỳ/chi nhánh/tìm kiếm.
 
-THÔNG TIN BÁO KHÁCH
-Chi tiết đơn hiện báo giá, kết quả kiểm tra để báo khách, đang chờ việc gì,
-dự kiến hoàn tất, lần gần nhất báo khách và nội dung đã báo.
-Kỹ thuật/QL kỹ thuật/Trưởng phòng/Admin bấm Cập nhật thông tin để ghi
-kết quả ngắn gọn, lý do chờ, dự kiến hoàn tất và báo giá.
-Kết quả xử lý trong form cập nhật kỹ thuật cũng được hiển thị khi chưa có
-bản tóm tắt báo khách riêng. Hẹn trả ban đầu không bị tự đổi khi nhập dự kiến.
-CSKH/cửa hàng/kỹ thuật/quản lý có thể ghi nhận đã báo khách và kênh liên hệ.
-CSKH không được đổi trạng thái, báo giá hoặc xác nhận nhận máy.
+LỊCH SỬ VÀ DỊCH VỤ
+Chi tiết có lịch sử theo IMEI và SĐT toàn bộ DATA, ghi nhận lần tiếp nhận.
+Dịch vụ thực tế chọn nhiều mục từ DM_DICH_VU; lưu DATA/CT_DICH_VU và log trước/sau.
+Báo giá tổng nhập riêng. Chi nhánh lấy DATA, không hiện doanh thu/chi phí/lợi nhuận.
+CSKH xem thông tin kiểm tra, lý do chờ, dự kiến hoàn tất và ghi lần báo khách.
+THEO_DOI_DON tự tạo khi cần; không đổi cấu trúc DATA hay form Sale.
+Giữ cache ngắn, phân trang, kiểm tra phiên bản và retry chỉ cho yêu cầu đọc.
 
-LỊCH SỬ VÀ TÌM KIẾM
-Chi tiết hiện người cập nhật, thời gian, trạng thái trước/sau, xác nhận nhận máy,
-thông tin báo khách và lần liên hệ. Lịch sử cũ chỉ hiện những gì có trong LOG.
-Tìm IMEI/SĐT/tên khách/mã đơn sẽ tìm trên toàn bộ lịch sử, không cần biết tháng.
-Tìm từ Máy còn tồn sẽ chuyển sang Danh sách để tìm được cả máy đã trả.
-Bộ lọc chi nhánh/trạng thái vẫn áp dụng cho kết quả tìm kiếm.
-
-DỮ LIỆU MỚI
-Sheet THEO_DOI_DON được tự tạo khi ghi nhận thao tác mới đầu tiên.
-Lưu xác nhận nhận máy, thông tin báo khách và lần liên hệ theo mã đơn.
-Không thêm các cột này vào DATA, không đổi cột hoặc luồng nhập Sale từ link khác.
-Báo giá tiếp tục cập nhật vào cột hiện có trong DATA.
-LOG_SUA_CHUA tiếp tục ghi lịch sử; trạng thái mới ghi rõ trước và sau.
-
-TỐC ĐỘ / KIỂM TRA
-Giữ cache ngắn hạn, đọc DATA theo khoảng cột vận hành và phân trang.
-Theo dõi đơn được đọc thêm từ sheet nhỏ THEO_DOI_DON; bỏ cache sau cập nhật.
-Giữ Nhận hôm nay / Trả hôm nay / Tổng máy còn tồn cùng thống kê thợ/chi nhánh/quá hẹn.
-Đã kiểm tra mô phỏng: bàn giao, quyền CSKH, báo giá/kết quả/dự kiến,
-lịch sử trước/sau, tìm đơn năm cũ, không trộn IMEI với mã liên kết,
-cache/chuyển mục và thống kê 6.006 đơn. Chưa kiểm tra deployment thật.
-
-V16.5 – LỊCH SỬ MÁY/KHÁCH VÀ NHIỀU DỊCH VỤ
-Chi tiết đơn hiện các lần tiếp nhận cùng IMEI và cùng SĐT trên toàn bộ DATA,
-kể cả đơn đã trả từ các năm trước. SĐT +84 được đối chiếu với dạng 0.
-Không ghép khách chỉ vì trùng tên; không tra cứu bằng IMEI/SĐT trống.
-Số lần tiếp nhận tính theo phiếu, gồm cả phiếu hiện tại và bảo hành; không
-khẳng định mọi lần tiếp nhận đều đã sửa thành công. Thứ tự theo ngày nhận;
-phiếu thiếu ngày xếp trước, cùng ngày xếp theo mã phiếu.
-Kỹ thuật chọn nhiều dịch vụ từ DM_DICH_VU, bỏ dịch vụ cũ và chọn dịch vụ
-thực tế. Dịch vụ cũ ngoài danh mục vẫn giữ được; dịch vụ thêm mới phải
-thuộc danh mục. Lưu vào DATA và CT_DICH_VU; LOG ghi dịch vụ trước/sau.
-Giữ giá/ghi chú của dịch vụ cũ còn được chọn. Báo giá tổng vẫn nhập riêng,
-không tự cộng giá danh mục. Lịch sử máy/khách là các tóm tắt vận hành,
-không chứa chi phí/lợi nhuận. Chỉ tải khi mở chi tiết, tái sử dụng cache DATA.
-
-Kiểm tra V16.5: mô phỏng lịch sử nhiều năm, IMEI/SĐT, danh mục dịch vụ,
-thêm/bỏ/xóa hết/chống trùng dịch vụ, giữ giá và ghi chú, log trước/sau;
-kiểm tra lại thống kê 6.006 đơn, cache và phân quyền. Chưa test deployment thật.
-
-V16.5 – QUY TẮC TỒN VÀ PHẠM VI HAI DANH SÁCH
-Trạng thái 8/9/10/11 tính kết thúc; trạng thái 1–7 tính tồn, gồm cả 7 sửa xong.
-Trạng thái trống/không rõ vẫn giữ trong tồn để không bỏ sót phiếu cần xử lý.
-Máy còn tồn: mọi đơn còn tồn đến hôm nay, kể cả nhận ở các kỳ trước.
-Danh sách: tất cả trạng thái trong kỳ đã chọn; không tự gộp tồn kỳ trước.
-Tìm kiếm trong Danh sách vẫn tra toàn bộ lịch sử.
-Tổng quan vẫn cộng tồn cũ; cảnh báo quá hẹn và thống kê thợ/chi nhánh
-cũng áp dụng quy tắc kết thúc mới. Trả hôm nay vẫn là trạng thái 8 có ngày
-trả hôm nay, không coi Back/Bảo hành/Hủy là thực tế đã trả máy.
-Quyền cập nhật, xác nhận bàn giao và khóa đơn trạng thái 8 giữ nguyên.
-
-Đã kiểm tra mô phỏng riêng đủ 11 trạng thái: tồn 1–7, kết thúc 8–11,
-đơn cũ chỉ vào mục tồn, danh sách theo kỳ, tìm xuyên năm và trả hôm nay.
+KIỂM TRA
+Đã mô phỏng: chặn nhảy 6 -> 8–11, chặn 7 -> 8–11 khi chưa CH nhận,
+CH chỉ nhận ở 7, cửa hàng kết thúc đủ 8–11 sau CH nhận, ngày trả chỉ ghi
+cho 8, quay lại xử lý phải nhận lại, quyền kỹ thuật và lựa chọn giao diện.
+Chưa kiểm tra deployment thật.
