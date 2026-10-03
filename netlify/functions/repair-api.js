@@ -1,4 +1,4 @@
-const APPS_SCRIPT_URL = (process.env.REPAIR_APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbz52-KB0WwOdMr5aENS_roQG9xpuWGnKOTCPj1iN9ZPt4MGl09w822YI-RtS6PDy1RXBw/exec').trim();
+const APPS_SCRIPT_URL = (process.env.REPAIR_APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbzWzkRhxjRywVy81oK7yxaD5qLIloKITcHFFhmvgEsDS7HP3ff6n1w7cXfXn1SXZfrE/exec').trim();
 
 exports.handler = async function(event) {
   const headers = {
