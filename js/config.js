@@ -1,5 +1,5 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWzkRhxjRywVy81oK7yxaD5qLIloKITcHFFhmvgEsDS7HP3ff6n1w7cXfXn1SXZfrE/exec';
-const EXPECTED_API_VERSION = '16.7';
+const EXPECTED_API_VERSION = '16.8';
 
 // Không để mật khẩu thật ở frontend. Đăng nhập được xác thực ở Apps Script (action: login).
 // Chỉ bật LOCAL_AUTH_FALLBACK khi test offline/demo.
@@ -11,7 +11,7 @@ const ROLE_LABELS = {
   store: 'Cửa hàng',
   cskh: 'CSKH',
   tech_manager: 'QL kỹ thuật',
-  department_head: 'Trưởng phòng',
+  department_head: 'Quản lý',
   admin: 'Admin'
 };
 
