@@ -61,7 +61,7 @@ const DEFAULTS = {
   CHAM_CONG_THO: [['Tháng', 'Kỹ thuật', 'Ngày', 'Trạng thái', 'Ghi chú', 'Ngày cập nhật', 'Người nhập']]
 };
 
-const API_VERSION = '16.8';
+const API_VERSION = '16.9';
 
 function canonicalAction_(value) {
   const raw = String(value || '').trim();
@@ -1792,14 +1792,14 @@ function operationRows_(body,session){
  return rows;
 }
 function operationsOverview_(body,session){
- const rows=operationRows_(Object.assign({},body,{includePending:true}),session),month=rows.filter(function(r){return inV15Range_(r,body.from,body.to);}),pending=rows.filter(function(r){const date=parseV15Date_(r.date);return isOutstandingOps_(r)&&(!date||date<=v15DayEnd_(parseV15Date_(Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'))));}),today=Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'),receivedToday=readOpsData_(false).filter(function(r){return inV15Range_(r,today,today);}),returnedToday=readOpsData_(false).filter(function(r){return opsCode_(r.status)===8&&inV15Range_({date:r.handoverDate},today,today);}),todayStatuses={},tech={},branches={};
+ const rows=operationRows_(Object.assign({},body,{includePending:true}),session),month=rows.filter(function(r){return inV15Range_(r,body.from,body.to);}),pending=rows.filter(function(r){const date=parseV15Date_(r.date);return isOutstandingOps_(r)&&(!date||date<=v15DayEnd_(parseV15Date_(Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'))));}),today=Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd'),receivedToday=readOpsData_(false).filter(function(r){return inV15Range_(r,today,today);}),returnedToday=readOpsData_(false).filter(function(r){return opsCode_(r.status)===8&&inV15Range_({date:r.handoverDate},today,today);}),todayStatuses=Object.create(null),tech=Object.create(null),branches=Object.create(null),serviceTypes=Object.create(null);
  function group(map,name){if(!map[name])map[name]={name:name,total:0,pending:0};return map[name];}
- month.forEach(function(r){group(tech,r.technician||'Chưa gán').total++;group(branches,r.branch||'Chưa có chi nhánh').total++;});
+ month.forEach(function(r){group(tech,r.technician||'Chưa gán').total++;group(branches,r.branch||'Chưa có chi nhánh').total++;const type=group(serviceTypes,String(r.serviceType||'').trim()||'Chưa phân loại');type.total++;if(isOutstandingOps_(r))type.pending++;});
  pending.forEach(function(r){group(tech,r.technician||'Chưa gán').pending++;group(branches,r.branch||'Chưa có chi nhánh').pending++;});
  receivedToday.forEach(function(r){const n=opsCode_(r.status);todayStatuses[n]=(todayStatuses[n]||0)+1;});
  const late=pending.filter(isOverdueOps_).sort(function(a,b){return (parseV15Date_(a.appointment)||0)-(parseV15Date_(b.appointment)||0);});
  function arr(map){return Object.keys(map).map(function(k){return map[k];}).sort(function(a,b){return b.pending-a.pending||b.total-a.total;});}
- return {success:true,data:{periodTotal:month.length,pending:pending.length,waitingStore:readOpsData_(false).filter(function(r){return isAwaitingStoreOps_(r);}).length,receivedToday:receivedToday.length,returnedToday:returnedToday.length,receivedTodayPending:receivedToday.filter(isOutstandingOps_).length,todayLabel:today,todayStatuses:todayStatuses,technicians:arr(tech),branches:arr(branches),overdue:late.length,overdueRows:late.slice(0,20).map(function(r){return sanitizeRepairForRole_(r,session.role);}),branchOptions:Array.from(new Set(rows.map(function(r){return r.branch||'Chưa có chi nhánh';}))).sort()}};
+ return {success:true,data:{periodTotal:month.length,pending:pending.length,waitingStore:readOpsData_(false).filter(function(r){return isAwaitingStoreOps_(r);}).length,receivedToday:receivedToday.length,returnedToday:returnedToday.length,receivedTodayPending:receivedToday.filter(isOutstandingOps_).length,todayLabel:today,todayStatuses:todayStatuses,technicians:arr(tech),branches:arr(branches),serviceTypes:arr(serviceTypes).map(function(t){t.completed=t.total-t.pending;return t;}),overdue:late.length,overdueRows:late.slice(0,20).map(function(r){return sanitizeRepairForRole_(r,session.role);}),branchOptions:Array.from(new Set(rows.map(function(r){return r.branch||'Chưa có chi nhánh';}))).sort()}};
 }
 function isAwaitingStoreOps_(r){return opsCode_(r.status)===7&&!(r.tracking||{}).storeReceivedAt;}
 function operationsList_(body,session){
@@ -1809,6 +1809,7 @@ function operationsList_(body,session){
   if(body.q)list=list.filter(function(r){return matchesQueryV15_(r,body.q);});
   if(body.branch)list=list.filter(function(r){return (r.branch||'Chưa có chi nhánh')===body.branch;});
   if(body.technician)list=list.filter(function(r){return (r.technician||'Chưa gán')===body.technician;});
+  if(body.serviceType)list=list.filter(function(r){return (String(r.serviceType||'').trim()||'Chưa phân loại')===body.serviceType;});
 
   return list;
  }
@@ -1844,15 +1845,15 @@ function readOpsData_(fresh){
  if(OPS_DATA_LOCAL_&&!fresh)return OPS_DATA_LOCAL_;
  let cache,revision='0',prefix;
  try{
-   cache=CacheService.getScriptCache();revision=PropertiesService.getScriptProperties().getProperty('OPS_DATA_REV')||'0';prefix='OPS168_'+revision;
+   cache=CacheService.getScriptCache();revision=PropertiesService.getScriptProperties().getProperty('OPS_DATA_REV')||'0';prefix='OPS169_'+revision;
    if(!fresh){const raw=cache.get(prefix);if(raw){const meta=JSON.parse(raw),keys=Array.from({length:meta.parts},function(_,i){return prefix+'_'+i;}),parts=cache.getAll(keys);if(keys.every(function(k){return parts[k];})){const encoded=keys.map(function(k){return parts[k];}).join('');return OPS_DATA_LOCAL_=JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(encoded))).getDataAsString());}}}
  }catch(e){}
  const sheet=sh(SHEETS.DATA),last=sheet.getLastRow(),width=sheet.getLastColumn();if(last<2)return OPS_DATA_LOCAL_=[];
  const headers=sheet.getRange(1,1,1,width).getValues()[0],map={};headers.forEach(function(h,i){const k=String(h||'').trim();if(k&&map[k]===undefined)map[k]=i;});
- const aliases=[['Mã sửa chữa','Mã SC','Mã sửa','MA SUA CHUA'],['IMEI','IMEI/Serial','Serial'],['Ngày nhận','Ngày tiếp nhận','Dấu thời gian'],['Chi nhánh nhận','CN nhận','Chi nhánh','CN'],['Sản phẩm','Dòng máy','Tên máy'],['Tên khách hàng','Họ tên khách hàng','Họ và tên','Khách hàng'],['Số điện thoại','SĐT','Điện thoại'],['Yêu cầu sửa chữa','Yêu cầu','Nội dung sửa chữa'],['Dịch vụ sửa chữa','Dịch vụ','DV sửa chữa'],['Kỹ thuật xử lý','Kỹ thuật','KTV'],['Trạng thái máy','Trạng thái','Tình trạng xử lý'],['Hẹn trả','Ngày hẹn trả','Ngày hẹn'],['Ngày hoàn thành','Ngày sửa xong'],['Ngày bàn giao','Ngày trả khách','Ngày trả'],['Giá dự kiến','Giá báo dự kiến','Báo giá dự kiến']];
+ const aliases=[['Mã sửa chữa','Mã SC','Mã sửa','MA SUA CHUA'],['IMEI','IMEI/Serial','Serial'],['Ngày nhận','Ngày tiếp nhận','Dấu thời gian'],['Chi nhánh nhận','CN nhận','Chi nhánh','CN'],['Sản phẩm','Dòng máy','Tên máy'],['Tên khách hàng','Họ tên khách hàng','Họ và tên','Khách hàng'],['Số điện thoại','SĐT','Điện thoại'],['Yêu cầu sửa chữa','Yêu cầu','Nội dung sửa chữa'],['Dịch vụ sửa chữa','Dịch vụ','DV sửa chữa'],['Kỹ thuật xử lý','Kỹ thuật','KTV'],['Trạng thái máy','Trạng thái','Tình trạng xử lý'],['Hẹn trả','Ngày hẹn trả','Ngày hẹn'],['Ngày hoàn thành','Ngày sửa xong'],['Ngày bàn giao','Ngày trả khách','Ngày trả'],['Giá dự kiến','Giá báo dự kiến','Báo giá dự kiến'],['Loại dịch vụ','Loại DV','Nhóm loại dịch vụ']];
  const columns=[];aliases.forEach(function(a){periodColumns_(map,a).forEach(function(c){if(columns.indexOf(c)<0)columns.push(c);});});
  if(!periodColumns_(map,aliases[0]).length||!periodColumns_(map,aliases[2]).length||!periodColumns_(map,aliases[10]).length)throw new Error('DATA thiếu cột Mã sửa chữa, Ngày nhận hoặc Trạng thái.');
- const first=Math.min.apply(null,columns),end=Math.max.apply(null,columns),values=sheet.getRange(2,first+1,last-1,end-first+1).getValues(),keys=['repairId','imei','date','branch','product','customer','phone','request','repairService','technician','status','appointment','completedDate','handoverDate','estimate'];
+ const first=Math.min.apply(null,columns),end=Math.max.apply(null,columns),values=sheet.getRange(2,first+1,last-1,end-first+1).getValues(),keys=['repairId','imei','date','branch','product','customer','phone','request','repairService','technician','status','appointment','completedDate','handoverDate','estimate','serviceType'];
  const out=[];values.forEach(function(v){const sparse=[];columns.forEach(function(c){sparse[c]=v[c-first];});const row={};aliases.forEach(function(a,i){let value=rowValue_(sparse,map,a);if(Object.prototype.toString.call(value)==='[object Date]')value=Utilities.formatDate(value,TZ,'yyyy-MM-dd HH:mm:ss');row[keys[i]]=keys[i]==='estimate'&&value!==''?moneyValue(value):value;});if(row.repairId)out.push(row);});out.reverse();const tracking=readOpsTracking_();out.forEach(function(r){r.tracking=tracking[String(r.repairId)]||{};});OPS_DATA_LOCAL_=out;
  try{if(cache&&prefix){const encoded=Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(out))).getBytes()),parts={};let n=0;for(let i=0;i<encoded.length;i+=80000)parts[prefix+'_'+n++]=encoded.slice(i,i+80000);if(n<20){cache.putAll(parts,15);cache.put(prefix,JSON.stringify({parts:n}),15);}}}catch(e){}
  return out;

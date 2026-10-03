@@ -1,4 +1,4 @@
-POPOPHONE V16.8
+POPOPHONE V16.9
 
 TRIỂN KHAI
 Thay appscript/Code.gs và cập nhật deployment hiện tại bằng New version > Deploy.
@@ -39,7 +39,7 @@ CH chỉ nhận ở 7, cửa hàng kết thúc đủ 8–11 sau CH nhận, ngày
 cho 8, quay lại xử lý phải nhận lại, quyền kỹ thuật và lựa chọn giao diện.
 Chưa kiểm tra deployment thật.
 
-V16.8 – CHỈ BA TÀI KHOẢN DÙNG CHUNG
+V16.9 – CHỈ BA TÀI KHOẢN DÙNG CHUNG
 kt / 123456: kỹ thuật dùng chung, xem mọi đơn ở hai chi nhánh, KT nhận,
 chọn người làm từ DM_KY_THUAT, cập nhật dịch vụ và trạng thái xử lý.
 ql / pocn113: quản lý dùng chung, xem/điều phối mọi đơn, CH nhận, kết thúc
@@ -55,6 +55,21 @@ LOG ghi tài khoản dùng chung thực hiện; không xác định cá nhân đ
 Người KT nhận và người sửa được lưu riêng; đổi người sửa không đổi lịch sử nhận.
 Giữ luồng 7 -> CH nhận -> 8–11 và quy tắc tồn 1–7.
 
-Đã kiểm tra mô phỏng V16.8: ba tài khoản/quyền, mật khẩu cấu hình, loại phiên
+Đã kiểm tra mô phỏng V16.9: ba tài khoản/quyền, mật khẩu cấu hình, loại phiên
 cũ, KT xem mọi đơn, lựa chọn danh mục không bị tên đăng nhập ghi đè, lưu
 người KT nhận riêng người sửa, giữ luồng 7 -> CH nhận -> 8–11 và thống kê tồn.
+
+V16.9 – NÚT THEO QUYỀN VÀ THỐNG KÊ LOẠI DỊCH VỤ
+Ẩn nút CH nhận/kết thúc đối với KT; chỉ QL/Admin có.
+Tất cả hàm mở/cập nhật có chặn quyền ngay trước khi gọi API, tránh chờ
+API cho thao tác không được phép. API vẫn giữ kiểm tra quyền và bàn giao.
+KT không được chọn 8; QL/Admin có 8–11 khi 7 đã CH nhận.
+Tổng quan thêm Theo loại dịch vụ, lấy cột Loại dịch vụ trong DATA: tổng đơn,
+kết thúc (8–11), còn tồn (1–7 hoặc chưa rõ) trong kỳ chọn. Không đếm theo
+dịch vụ sửa chữa, không nhân số đơn khi một máy có nhiều dịch vụ.
+Đơn thiếu loại vào Chưa phân loại. Bấm nhóm mở danh sách đúng loại trong kỳ.
+Tổng tồn chung vẫn gồm kỳ trước; số tồn trong nhóm loại chỉ thuộc kỳ chọn.
+Không thêm sheet; thêm một trường vào snapshot DATA, giữ đọc bulk và cache.
+
+Đã mô phỏng quyền/nút, chặn trước API, thống kê theo loại trong kỳ, loại trống,
+bấm nhóm để lọc và kiểm tra lại tài khoản chung/luồng bàn giao. Chưa test deployment thật.
