@@ -1,75 +1,64 @@
-POPOPHONE V16.9
+GIAO DIỆN 17.5 – THANH CHUYỂN MÀN HÌNH VÀ BỘ LỌC
+Chỉ deploy Netlify. API giữ 17.5. Admin và Theo dõi đơn dùng chung thanh chuyển.
+Bộ lọc Admin: năm/tháng đều nhau, chi nhánh toàn chiều ngang, khoảng ngày mở
+khi cần. Bỏ input tháng của iOS và nút reset nổi.
+
+GIAO DIỆN ADMIN 17.2 – API giữ 17.5
+Chỉ cần deploy lại source Netlify nếu Apps Script 17.5 đang chạy.
+Bỏ các khối trùng vận hành: việc cần xử lý, nổi bật, top dòng máy, KPI KTV,
+tồn vận hành, điểm vận hành và các bộ đếm trạng thái lặp lại.
+Admin dùng operations.css giống màn hình sửa chữa; không nạp style giao diện
+source tham khảo. Nhu cầu vật tư chuyển về tab Vật tư.
+
+POPOPHONE V17.5 – ADMIN RIÊNG VÀ TẢI NHẸ
 
 TRIỂN KHAI
-Thay appscript/Code.gs và cập nhật deployment hiện tại bằng New version > Deploy.
-Deploy toàn bộ source Netlify, giữ URL /exec đang chạy. Tải lại trang.
+Thay Code.gs rồi Manage deployments > Edit > New version > Deploy.
+Deploy toàn bộ thư mục source Netlify; giữ URL /exec hiện tại. Đăng nhập lại.
+kt / 123456; ql / pocn113; admin / pocn113. Script properties có thể ghi đè
+REPAIR_KT_PASSWORD, REPAIR_QL_PASSWORD, REPAIR_ADMIN_PASSWORD.
 
-LUỒNG NHẬN VÀ KẾT THÚC
-Nút và nhãn rút gọn KT nhận, CH nhận.
-KT nhận ghi nhận máy thực tế, người nhận và thời gian.
-Kỹ thuật cập nhật 1–7 theo tiến độ. CH chỉ nhận khi trạng thái 7. Đã sửa xong.
-Sau CH nhận mới được chuyển từ 7 sang 8/9/10/11. API chặn bỏ qua bước,
-kể cả Admin; giao diện chỉ cho chọn trạng thái kết thúc khi đủ điều kiện.
-Cửa hàng/quản lý dùng Cập nhật 8–11 sau khi xác nhận CH nhận.
-Kỹ thuật vẫn không xác nhận 8. Đã trả khách; được 9–11 sau CH nhận.
-CH nhận chỉ ghi xác nhận, không tự đổi trạng thái hay tăng số trả hôm nay.
-Nếu đơn chuyển lại trạng thái 1–7 để xử lý, xác nhận CH cũ bị xóa; phải CH nhận
-lại ở trạng thái 7. Lịch sử bàn giao cũ trong LOG vẫn giữ.
-Đơn cũ kết thúc 8–11 không tự đổi dữ liệu, không tạo xác nhận bàn giao giả.
-Cập nhật trạng thái và xác nhận nhận dùng chung ScriptLock tránh cập nhật song song.
+ADMIN
+Đăng nhập admin mở admin.html. KT/QL tiếp tục dùng dashboard.html.
+Admin chỉ có 4 mục: Tổng quan, Chi phí lợi nhuận, Vật tư và Báo cáo.
+Dữ liệu/nội dung theo REPAIR-main (11), giao diện theo bản mobile vận hành.
+Không dùng sidebar hay giao diện desktop của source tham khảo.
+Chi phí hiển thị thẻ đơn với chi nhánh, IMEI, tên khách, dòng máy, dịch vụ,
+báo giá, chi phí, thực thu và lợi nhuận. Có chọn tất cả đơn/chưa nhập chi phí.
+Báo cáo hiện theo kỳ đang chọn, xem trên mobile hoặc in/PDF qua trình duyệt.
+Admin có link quay lại màn hình tiến độ để KT nhận/CH nhận và cập nhật trạng thái
+theo luồng 7 -> CH nhận -> 8–11, cùng lịch sử IMEI/SĐT và nhiều dịch vụ.
+Dữ liệu tiền chỉ trả qua API Admin có kiểm tra quyền, không thêm vào API KT/QL.
+Tổng quan/chi phí lấy kỳ hoặc khoảng ngày đã chọn, chi nhánh từ DATA.
+Chi phí ghi DATA/CT_VAT_TU, tính tổng chi phí = vật tư + công thợ,
+lợi nhuận = thực thu - tổng chi phí; ghi một block DATA, không nhiều setCell.
+Chỉ trạng thái 8 ghi ngày trả thực tế; 8–11 kết thúc, 1–7 còn tồn.
+Các con số tài chính theo ngày nhận đơn trong kỳ, không phải ngày thu tiền.
 
-TỒN VÀ DANH SÁCH
-1–7 còn tồn; 8–11 kết thúc. Tổng quan cộng tồn kỳ trước.
-Máy còn tồn chỉ lấy tồn; Danh sách lấy mọi trạng thái trong kỳ. Tìm kiếm xuyên năm.
-Chờ CH nhận lấy mọi kỳ, chỉ trạng thái 7 chưa CH nhận.
-Trả hôm nay chỉ trạng thái 8 có ngày trả hôm nay.
-Các nút bo tròn có số đếm trước lọc trạng thái và phân trang, theo kỳ/chi nhánh/tìm kiếm.
+TỐC ĐỘ
+Vận hành mở màn hình bằng operationsStart: phiên bản + danh mục nhẹ + tổng quan
+trong một lượt API, không phải chờ hai lượt nối tiếp rồi tải nền ba danh sách.
+Danh mục vận hành cache 5 phút; snapshot DATA cache 60 giây; frontend 2 phút.
+Các lần cập nhật app xóa cache; Sale nhập ngoài app có thể chậm xuất hiện do cache DATA 60 giây và cache giao diện 2 phút.
+Nút Làm mới lấy DATA mới ngay.
+Form KT nhận/cập nhật chỉ tải một đơn và dịch vụ; không quét lịch sử máy/khách
+và LOG trước khi mở form. Chi tiết đầy đủ vẫn tải khi bấm Chi tiết.
+Admin chỉ trả đơn trong kỳ, không tải toàn bộ 2022–nay xuống trình duyệt.
+Vật tư và báo cáo tải chi tiết khi mở mục tương ứng.
+Admin và thao tác ngoài app vẫn chịu thời gian kết nối Apps Script/Netlify.
 
-LỊCH SỬ VÀ DỊCH VỤ
-Chi tiết có lịch sử theo IMEI và SĐT toàn bộ DATA, ghi nhận lần tiếp nhận.
-Dịch vụ thực tế chọn nhiều mục từ DM_DICH_VU; lưu DATA/CT_DICH_VU và log trước/sau.
-Báo giá tổng nhập riêng. Chi nhánh lấy DATA, không hiện doanh thu/chi phí/lợi nhuận.
-QL xem thông tin kiểm tra, lý do chờ, dự kiến hoàn tất và ghi lần báo khách.
-THEO_DOI_DON tự tạo khi cần; không đổi cấu trúc DATA hay form Sale.
-Giữ cache ngắn, phân trang, kiểm tra phiên bản và retry chỉ cho yêu cầu đọc.
+SHEETS
+Giữ 8 sheet vận hành DATA, CT_DICH_VU, LOG_SUA_CHUA, THEO_DOI_DON,
+DM_DICH_VU, DM_KY_THUAT, DM_LOAI_DICH_VU, DM_DONG_MAY.
+4 mục Admin dùng thêm CT_VAT_TU, DM_VAT_TU, DM_NCC.
+Sheet hoa hồng/công bổ sung/máy gửi cũ không dùng trong 4 mục này; giữ lại
+nếu có ứng dụng hoặc source khác còn sử dụng. Không tự xóa dữ liệu cũ.
+Không thêm chấm công/lương. Không xóa/đổi cấu trúc DATA hoặc luồng Sale.
 
 KIỂM TRA
-Đã mô phỏng: chặn nhảy 6 -> 8–11, chặn 7 -> 8–11 khi chưa CH nhận,
-CH chỉ nhận ở 7, cửa hàng kết thúc đủ 8–11 sau CH nhận, ngày trả chỉ ghi
-cho 8, quay lại xử lý phải nhận lại, quyền kỹ thuật và lựa chọn giao diện.
-Chưa kiểm tra deployment thật.
+Kiểm tra cục bộ/mô phỏng; chưa đo trên deployment thật hoặc dữ liệu thật của bạn.
 
-V16.9 – CHỈ BA TÀI KHOẢN DÙNG CHUNG
-kt / 123456: kỹ thuật dùng chung, xem mọi đơn ở hai chi nhánh, KT nhận,
-chọn người làm từ DM_KY_THUAT, cập nhật dịch vụ và trạng thái xử lý.
-ql / pocn113: quản lý dùng chung, xem/điều phối mọi đơn, CH nhận, kết thúc
-8–11, cập nhật xử lý và ghi nhận báo khách.
-admin / pocn113: quản trị, sửa/mở lại đơn.
-Có thể đặt mật khẩu thay thế trong Script properties REPAIR_KT_PASSWORD,
-REPAIR_QL_PASSWORD, REPAIR_ADMIN_PASSWORD; không phải sửa code.
-Tài khoản cá nhân, ms001–ms005 và cskh cũ bị bỏ; cần đăng nhập lại.
-Phiên đăng nhập cũ không dùng được trên API mới.
-Không giới hạn theo tên người đăng nhập, không tự gán Kỹ thuật/Quản lý
-vào DATA. KT nhận phải chọn tên danh mục; người sửa chọn trong cập nhật.
-LOG ghi tài khoản dùng chung thực hiện; không xác định cá nhân đăng nhập.
-Người KT nhận và người sửa được lưu riêng; đổi người sửa không đổi lịch sử nhận.
-Giữ luồng 7 -> CH nhận -> 8–11 và quy tắc tồn 1–7.
-
-Đã kiểm tra mô phỏng V16.9: ba tài khoản/quyền, mật khẩu cấu hình, loại phiên
-cũ, KT xem mọi đơn, lựa chọn danh mục không bị tên đăng nhập ghi đè, lưu
-người KT nhận riêng người sửa, giữ luồng 7 -> CH nhận -> 8–11 và thống kê tồn.
-
-V16.9 – NÚT THEO QUYỀN VÀ THỐNG KÊ LOẠI DỊCH VỤ
-Ẩn nút CH nhận/kết thúc đối với KT; chỉ QL/Admin có.
-Tất cả hàm mở/cập nhật có chặn quyền ngay trước khi gọi API, tránh chờ
-API cho thao tác không được phép. API vẫn giữ kiểm tra quyền và bàn giao.
-KT không được chọn 8; QL/Admin có 8–11 khi 7 đã CH nhận.
-Tổng quan thêm Theo loại dịch vụ, lấy cột Loại dịch vụ trong DATA: tổng đơn,
-kết thúc (8–11), còn tồn (1–7 hoặc chưa rõ) trong kỳ chọn. Không đếm theo
-dịch vụ sửa chữa, không nhân số đơn khi một máy có nhiều dịch vụ.
-Đơn thiếu loại vào Chưa phân loại. Bấm nhóm mở danh sách đúng loại trong kỳ.
-Tổng tồn chung vẫn gồm kỳ trước; số tồn trong nhóm loại chỉ thuộc kỳ chọn.
-Không thêm sheet; thêm một trường vào snapshot DATA, giữ đọc bulk và cache.
-
-Đã mô phỏng quyền/nút, chặn trước API, thống kê theo loại trong kỳ, loại trống,
-bấm nhóm để lọc và kiểm tra lại tài khoản chung/luồng bàn giao. Chưa test deployment thật.
+Kiểm tra V17.5: tài khoản chung và quy tắc bàn giao, ẩn nút theo quyền,
+Admin kỳ/chi nhánh và quyền API tài chính, chi phí/giá vốn/lợi nhuận,
+lưu/xem lại vật tư, tổng quan Admin, kỳ không có đơn, tải module theo nhu cầu,
+startup vận hành một request, form sửa không đọc lịch sử. Chưa đo deployment thật.

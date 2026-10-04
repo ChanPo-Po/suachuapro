@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>POPOPHONE · Admin</title><link rel="stylesheet" href="css/operations.css?v=17.5"><link rel="stylesheet" href="css/admin.css?v=17.5"></head>
+<body class="ops-app admin-app"><div class="ops-shell"><header class="ops-header"><div><span class="ops-brand">POPOPHONE · ADMIN</span><h1 id="pageTitle">Tổng quan</h1></div><button onclick="refreshAll()" aria-label="Làm mới">↻</button></header><div class="ops-user"><div><b id="userName"></b><span id="userRole"></span></div><button onclick="logout()">Đăng xuất</button></div><nav class="ops-workspaces" aria-label="Không gian làm việc"><a href="admin.html" aria-current="page">Admin</a><a href="dashboard.html">Theo dõi đơn</a></nav>
+<div id="overviewTopFilters" class="admin-filter-card" aria-label="Lọc dữ liệu">
+<input id="overviewMonth" type="hidden"><select id="overviewMode" hidden><option value="month">Tháng</option><option value="range">Khoảng ngày</option></select>
+<div id="overviewMonthWrap" class="admin-period-row"><label><span>Năm</span><select id="adminYear" onchange="selectAdminPeriod()" aria-label="Năm"></select></label><label><span>Tháng</span><select id="adminMonth" onchange="selectAdminPeriod()" aria-label="Tháng"></select></label></div>
+<label class="admin-branch-filter"><span>Chi nhánh</span><select id="globalBranch" onchange="applyGlobalFilters()" aria-label="Chi nhánh"><option value="">Tất cả chi nhánh</option></select></label>
+<div class="admin-filter-footer"><details id="adminRangeOptions"><summary>Chọn khoảng ngày</summary><div id="overviewRangeWrap" class="admin-range-fields"><label><span>Từ ngày</span><input type="date" id="overviewFrom"></label><label><span>Đến ngày</span><input type="date" id="overviewTo"></label><button type="button" class="primary-btn" onclick="applyAdminRange()">Áp dụng</button></div></details><button type="button" class="admin-reset" onclick="resetOverviewFilters()">Tháng hiện tại</button></div>
+</div>
+<div class="ops-toolbar"><nav id="navMenu" class="ops-nav"><button data-tab="overview">Tổng quan</button><button data-tab="cost">Chi phí lợi nhuận</button><button data-tab="materials">Vật tư</button><button data-tab="weeklyReport">Báo cáo</button></nav></div><p id="overviewDataStatus" class="overview-data-status" role="status"></p><main><section id="overview" class="tab">
+<div class="ops-daily-head"><h2>Tài chính trong kỳ</h2><span id="adminPeriodLabel"></span></div>
+<div id="adminFinance" class="ops-kpis admin-finance"></div>
+<div id="adminSummary" class="ops-period-summary"></div>
+<section class="ops-section"><h2>Doanh thu theo tuần</h2><div id="weekChart" class="admin-week-list"></div></section>
+<section class="ops-section"><h2>Phân bổ loại dịch vụ</h2><div id="serviceTypeDist"></div></section>
+<section class="ops-section"><h2>Top dịch vụ</h2><div id="topServices"></div></section>
+<section class="ops-section"><h2>Dịch vụ theo dòng máy</h2><div class="matrix-toolbar"><input id="matrixModelFilter" placeholder="Tìm dòng máy" oninput="renderMatrix()"><input id="matrixServiceFilter" placeholder="Tìm dịch vụ" oninput="renderMatrix()"><select id="matrixLimit" onchange="renderMatrix()"><option value="20">Top 20 dòng máy</option><option value="40">Top 40 dòng máy</option><option value="999">Tất cả</option></select></div><div id="serviceMatrix"></div></section>
+</section><section id="cost" class="tab">
+        <div class="panel">
+          <div class="panel-head"><div><h3>Cập nhật chi phí</h3></div></div>
+          <div class="filter-row">
+            <select id="costScope" onchange="renderCostTable()"><option value="missing">Chưa nhập chi phí</option><option value="all">Tất cả đơn trong kỳ</option></select><input id="costQ" placeholder="Tìm mã/IMEI/SĐT" oninput="renderCostTable()" />
+            <select id="costStatus" onchange="renderCostTable()"><option value="">Trạng thái</option></select>
+            <select id="costPayment" onchange="renderCostTable()"><option value="">Thanh toán</option><option>Chưa thanh toán</option><option>Đã thanh toán</option></select>
+            <input id="costMaterialQ" placeholder="Vật tư/NCC" oninput="renderCostTable()" />
+            <button class="ghost-btn" onclick="renderCostTable()">Lọc</button>
+          </div>
+          <div id="costTable" class="table-wrap"></div>
+        </div>
+      </section><section id="materials" class="tab">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Vật tư sử dụng</h3>
+            </div>
+          </div>
+          <div class="filter-row"><input id="materialSearch" placeholder="Tìm vật tư" oninput="renderMaterialsFull()"><select id="materialGroup" onchange="renderMaterialsFull()"><option value="">Tất cả nhóm</option></select><select id="materialCatalogScope" onchange="renderMaterialsFull()"><option value="used">Vật tư đã dùng</option><option value="all">Tất cả danh mục</option></select></div><div id="materialsFull" class="table-wrap"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Tổng quan NCC sử dụng vật tư</h3>
+
+            </div>
+          </div>
+          <div id="materialsFullSupplierKpis" class="kpi-grid compact"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Phân tích theo NCC</h3>
+
+            </div>
+          </div>
+          <div id="materialsFullSupplierSummary" class="table-wrap"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Top vật tư theo NCC</h3>
+
+            </div>
+          </div>
+          <div id="materialsFullSupplierMaterials" class="supplier-grid"></div>
+        </div>
+      </section><section id="weeklyReport" class="tab">
+        <div class="panel">
+          <div class="panel-head">
+            <button class="primary-btn" onclick="printWeeklyReport()">Xuất PDF / In báo cáo</button>
+          </div>
+          <div class="filter-row report-filter-row">
+            <select id="reportWeek" onchange="renderWeeklyReport()">
+              <option value="">Cả kỳ đã chọn</option>
+              <option value="1">Tuần 1</option>
+              <option value="2">Tuần 2</option>
+              <option value="3">Tuần 3</option>
+              <option value="4">Tuần 4</option>
+              <option value="5">Tuần 5</option>
+            </select>
+            <button class="ghost-btn" onclick="renderWeeklyReport()">Tạo báo cáo</button>
+          </div>
+          <div id="weeklyReportPreview" class="report-preview-wrap"></div>
+        </div>
+      </section></main></div><div id="modal" class="modal"></div><div id="printArea" class="print-area"></div><script src="js/config.js?v=17.5"></script><script src="js/auth.js?v=17.5"></script><script src="js/admin.js?v=17.5"></script></body></html>
